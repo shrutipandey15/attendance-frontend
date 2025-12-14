@@ -5,6 +5,10 @@ import { generateDeviceKeys, isDeviceBound, signData, deleteDeviceKeys } from '.
 import { Query, Models } from 'appwrite';
 import { useRouter } from 'next/navigation';
 import { formatTimestamp } from '../lib/utils';
+import { 
+    PencilSquareIcon, ArrowRightOnRectangleIcon, ClockIcon, ArrowRightIcon, ArrowLeftIcon, CalendarDaysIcon, XMarkIcon, ShieldCheckIcon
+} from '@heroicons/react/24/outline'; 
+
 import { DB_ID, FUNCTION_ID, ADMIN_TEAM_ID, AUDIT_COLLECTION, EMPLOYEE_COLLECTION } from '../lib/constants';
 
 interface HistoryItem {
@@ -103,7 +107,7 @@ export default function Home() {
         [
           Query.equal('actorId', userId),
           Query.orderDesc('timestamp'),
-          Query.limit(5)
+          Query.limit(15) 
         ]
       );
 
@@ -216,22 +220,23 @@ export default function Home() {
     }
   };
 
-  if (loading && view === 'login') return <div className="p-10 text-center font-mono">Initializing Secure Environment...</div>;
+  if (loading && view === 'login') return <div className="p-10 text-center font-mono text-slate-400 bg-slate-900 min-h-screen">Initializing Secure Environment...</div>;
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center p-6 bg-slate-100 text-slate-900 font-sans relative">
+    <div className="flex min-h-screen flex-col items-center justify-center p-6 bg-slate-900 text-gray-100 font-sans relative">
       
       {view === 'dashboard' && (
          <div className="absolute top-4 right-4 flex items-center gap-3">
              <button 
                 onClick={() => setShowPwdModal(true)} 
-                className="flex items-center gap-2 text-sm font-bold text-gray-600 hover:text-blue-600 transition bg-white px-4 py-2 rounded-full shadow-sm border border-gray-200"
+                className="flex items-center gap-2 text-sm font-bold text-slate-400 hover:text-cyan-400 transition bg-slate-800 px-4 py-2 rounded-full shadow-md border border-slate-700"
              >
-                🔑 Change Pass
+                <PencilSquareIcon className="w-4 h-4" />
+                Change Pass
              </button>
              <button 
                 onClick={() => { account.deleteSession('current'); setView('login'); }} 
-                className="text-sm font-bold text-red-400 hover:text-red-600 underline decoration-2 underline-offset-4"
+                className="text-sm font-bold text-red-400 hover:text-red-500 underline decoration-2 underline-offset-4"
              >
                 Logout
              </button>
@@ -239,99 +244,134 @@ export default function Home() {
       )}
 
       {view === 'login' ? (
-        <div className="w-full max-w-md bg-white p-8 rounded-xl shadow-xl">
-          <h1 className="text-2xl font-bold mb-6 text-blue-900">🔐 Secure Access</h1>
+        <div className="w-full max-w-md bg-slate-800 p-8 rounded-xl shadow-2xl border border-slate-700">
+          <h1 className="text-3xl font-extrabold mb-6 text-white flex items-center gap-3">
+             <ArrowRightOnRectangleIcon className="w-6 h-6 text-cyan-500" />
+             Secure Sign In
+          </h1>
           
           {loginError && (
-            <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded font-bold">
+            <div className="mb-4 p-3 bg-red-900/50 border border-red-800 text-red-400 text-sm rounded font-bold">
                 {loginError}
             </div>
           )}
 
           <form onSubmit={handleLogin} className="flex flex-col gap-4">
-            <input type="email" placeholder="Email" className="p-3 border rounded" value={email} onChange={e => setEmail(e.target.value)} required />
-            <input type="password" placeholder="Password" className="p-3 border rounded" value={password} onChange={e => setPassword(e.target.value)} required />
-            <button disabled={loading} className="bg-blue-600 text-white p-3 rounded font-bold hover:bg-blue-700 disabled:opacity-50">
-              {loading ? 'Verifying...' : 'Login'}
+            <input type="email" placeholder="Email" className="p-3 border border-slate-700 rounded-lg w-full bg-slate-700 text-white placeholder-slate-400 focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400" value={email} onChange={e => setEmail(e.target.value)} required />
+            <input type="password" placeholder="Password" className="p-3 border border-slate-700 rounded-lg w-full bg-slate-700 text-white placeholder-slate-400 focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400" value={password} onChange={e => setPassword(e.target.value)} required />
+            <button disabled={loading} className="bg-cyan-600 text-white p-3 rounded-lg font-bold hover:bg-cyan-700 transition disabled:opacity-50 shadow-md">
+              {loading ? 'Verifying...' : 'Login Securely'}
             </button>
           </form>
         </div>
       ) : (
-        <div className="w-full max-w-md flex flex-col items-center gap-6 mt-10">
+        <div className="w-full max-w-md flex flex-col items-center gap-8 mt-10">
           <div className="text-center">
-            <h1 className="text-3xl font-bold text-slate-800">Hello, {user?.name}</h1>
-            <p className="text-slate-500 text-sm mt-1">{new Date().toDateString()}</p>
+            <h1 className="text-4xl font-extrabold text-white">Hello, {user?.name}</h1>
+            <p className="text-slate-400 text-sm mt-2 font-medium flex items-center gap-2">
+                <CalendarDaysIcon className="w-4 h-4 text-cyan-400" />
+                Today is {new Date().toDateString()}
+            </p>
           </div>
 
           <button 
             onClick={performAttendance}
             disabled={loading}
-            className={`w-48 h-48 rounded-full border-4 shadow-2xl flex flex-col items-center justify-center transition-all transform hover:scale-105 active:scale-95 ${
+            className={`w-60 h-60 rounded-full border-8 shadow-2xl flex flex-col items-center justify-center transition-all duration-300 transform hover:scale-105 active:scale-95 ${
               currentStatus === 'checked-in' 
-                ? 'bg-red-50 border-red-200 text-red-600 hover:bg-red-100' 
-                : 'bg-green-50 border-green-200 text-green-600 hover:bg-green-100'
+                ? 'bg-red-900/40 border-red-700 text-red-400 hover:bg-red-900/60' 
+                : 'bg-green-900/40 border-green-700 text-green-400 hover:bg-green-900/60'
             }`}
           >
-            <span className="text-4xl mb-2">
-              {currentStatus === 'checked-in' ? '🛑' : '🚀'}
+            <span className="text-6xl mb-2">
+              {currentStatus === 'checked-in' ? (
+                  <ArrowLeftIcon className="w-16 h-16" />
+              ) : (
+                  <ArrowRightIcon className="w-16 h-16" />
+              )}
             </span>
-            <span className="font-extrabold text-xl tracking-wider">
+            <span className="font-extrabold text-2xl tracking-wider">
               {currentStatus === 'checked-in' ? 'CHECK OUT' : 'CHECK IN'}
             </span>
-            <span className="text-xs uppercase mt-2 font-semibold opacity-60">
-              {loading ? 'Processing...' : (currentStatus === 'checked-in' ? 'End Shift' : 'Start Shift')}
+            <span className="text-sm uppercase mt-2 font-semibold opacity-60 text-slate-300">
+              {loading ? 'Processing Signature...' : (currentStatus === 'checked-in' ? 'End Shift Now' : 'Start Shift Securely')}
             </span>
           </button>
 
-          <div className={`px-6 py-2 rounded-full font-mono text-sm font-bold border ${
-             currentStatus === 'checked-in' ? 'bg-green-100 text-green-800 border-green-300' : 'bg-slate-200 text-slate-600 border-slate-300'
+          <div className={`px-6 py-3 rounded-xl font-mono text-base font-bold border shadow-inner ${
+             currentStatus === 'checked-in' ? 'bg-green-900/50 text-green-400 border-green-800' : 'bg-slate-700 text-cyan-400 border-cyan-800'
           }`}>
-            CURRENTLY: {currentStatus === 'checked-in' ? '🟢 CLOCKED IN' : '⚪ CLOCKED OUT'}
+            <ShieldCheckIcon className="w-5 h-5 inline mr-2" />
+            STATUS: {currentStatus === 'checked-in' ? 'CLOCKED IN' : 'CLOCKED OUT'}
           </div>
 
-          <div className="w-full bg-white rounded-lg shadow-md border border-slate-200 overflow-hidden mt-2">
-            <div className="bg-slate-50 px-4 py-2 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wide">
-              Recent Activity
+          <div className="w-full max-w-md bg-slate-800 rounded-xl shadow-lg border border-slate-700 overflow-hidden mt-2">
+            <div className="bg-slate-700 px-4 py-3 border-b border-slate-600 text-sm font-bold text-cyan-400 uppercase tracking-wide flex justify-between items-center">
+              <span>Recent Activity</span>
+              <span className="text-xs font-normal text-slate-500">{history.length} Logs</span>
             </div>
-            <div className="divide-y divide-slate-100">
-              {history.length === 0 && <div className="p-4 text-center text-sm text-slate-400 italic">No history found.</div>}
-              {history.map((item) => (
-                <div key={item.id} className="flex justify-between items-center p-3 hover:bg-slate-50 transition">
-                  <div className="flex flex-col">
-                    <span className={`text-sm font-bold ${item.action === 'check-in' ? 'text-green-600' : 'text-red-500'}`}>
-                      {item.action === 'check-in' ? 'Check In' : 'Check Out'}
-                    </span>
-                    <span className="text-xs text-slate-400">{item.timestamp}</span>
-                  </div>
-                  <div className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded">
-                    Verified
-                  </div>
+            {/* 🛠️ SCROLLABLE SECTION with fixed height for clarity */}
+            <div className="max-h-60 overflow-y-auto custom-scrollbar"> 
+                <style jsx global>{`
+                    .custom-scrollbar::-webkit-scrollbar {
+                        width: 8px;
+                    }
+                    .custom-scrollbar::-webkit-scrollbar-track {
+                        background: #1f2937; /* slate-800 */
+                    }
+                    .custom-scrollbar::-webkit-scrollbar-thumb {
+                        background-color: #06b6d4; /* cyan-500 */
+                        border-radius: 4px;
+                        border: 2px solid #1f2937;
+                    }
+                `}</style>
+
+                <div className="divide-y divide-slate-700">
+                  {history.length === 0 && <div className="p-4 text-center text-sm text-slate-500 italic">No history found.</div>}
+                  {history.map((item) => (
+                    <div key={item.id} className="flex justify-between items-center p-3 hover:bg-slate-700 transition">
+                      <div className="flex flex-col">
+                        <span className={`text-sm font-bold ${item.action === 'check-in' ? 'text-green-400' : 'text-red-400'}`}>
+                          {item.action === 'check-in' ? 'Check In' : 'Check Out'}
+                        </span>
+                        <span className="text-xs text-slate-400">{item.timestamp}</span>
+                      </div>
+                      <div className="text-xs bg-slate-900 text-cyan-400 px-3 py-1 rounded-full font-bold border border-cyan-900 flex items-center gap-1">
+                        <ShieldCheckIcon className="w-3 h-3" />
+                        VERIFIED
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
             </div>
           </div>
         </div>
       )}
 
       {showPwdModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-in fade-in duration-200">
-            <div className="bg-white p-6 rounded-xl shadow-2xl w-80">
-                <h2 className="text-lg font-bold mb-4 text-gray-800">Change Password</h2>
-                <form onSubmit={handleChangePassword} className="space-y-3">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+            <div className="bg-slate-800 p-8 rounded-xl shadow-2xl w-96 transform scale-100 transition-transform duration-300 border border-slate-700">
+                <div className="flex justify-between items-center border-b border-slate-700 pb-3 mb-5">
+                    <h2 className="text-xl font-extrabold text-white">Security: Change Password</h2>
+                    <button onClick={() => setShowPwdModal(false)} className="text-slate-400 hover:text-white transition">
+                        <XMarkIcon className="w-6 h-6" />
+                    </button>
+                </div>
+                <form onSubmit={handleChangePassword} className="space-y-4">
                     <div>
-                        <label className="text-xs font-bold text-gray-500 uppercase">Old Password</label>
-                        <input type="password" value={oldPwd} onChange={e=>setOldPwd(e.target.value)} className="w-full p-2 border rounded mt-1" required />
+                        <label className="text-xs font-bold text-slate-400 uppercase block mb-1">Old Password</label>
+                        <input type="password" value={oldPwd} onChange={e=>setOldPwd(e.target.value)} className="w-full p-3 border border-slate-600 rounded-lg bg-slate-700 text-white focus:ring-2 focus:ring-cyan-400" required />
                     </div>
                     <div>
-                        <label className="text-xs font-bold text-gray-500 uppercase">New Password</label>
-                        <input type="password" value={newPwd} onChange={e=>setNewPwd(e.target.value)} className="w-full p-2 border rounded mt-1" required />
+                        <label className="text-xs font-bold text-slate-400 uppercase block mb-1">New Password</label>
+                        <input type="password" value={newPwd} onChange={e=>setNewPwd(e.target.value)} className="w-full p-3 border border-slate-600 rounded-lg bg-slate-700 text-white focus:ring-2 focus:ring-cyan-400" required />
                     </div>
                     
-                    {pwdMsg && <p className={`text-xs font-bold text-center ${pwdMsg.includes('Error') ? 'text-red-500' : 'text-green-600'}`}>{pwdMsg}</p>}
+                    {pwdMsg && <p className={`text-sm font-bold text-center mt-3 ${pwdMsg.includes('Error') ? 'text-red-400 bg-red-900/50 p-2 rounded' : 'text-green-400 bg-green-900/50 p-2 rounded'}`}>{pwdMsg}</p>}
                     
-                    <div className="flex gap-2 pt-2">
-                        <button type="button" onClick={()=>{setShowPwdModal(false); setPwdMsg('');}} className="flex-1 bg-gray-100 py-2 rounded font-bold text-gray-600 hover:bg-gray-200">Cancel</button>
-                        <button type="submit" className="flex-1 bg-blue-600 py-2 rounded font-bold text-white hover:bg-blue-700">Update</button>
+                    <div className="flex gap-3 pt-4">
+                        <button type="button" onClick={()=>{setShowPwdModal(false); setPwdMsg('');}} className="flex-1 bg-slate-700 py-3 rounded-lg font-bold text-slate-300 hover:bg-slate-600 transition">Cancel</button>
+                        <button type="submit" className="flex-1 bg-cyan-600 py-3 rounded-lg font-bold text-white hover:bg-cyan-700 transition">Update Password</button>
                     </div>
                 </form>
             </div>
