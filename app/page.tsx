@@ -4,6 +4,7 @@ import { account, databases, functions, teams } from '../lib/appwrite';
 import { generateDeviceKeys, isDeviceBound, signData, deleteDeviceKeys } from '../lib/crypto';
 import { Query, Models } from 'appwrite';
 import { useRouter } from 'next/navigation';
+import { formatTimestamp } from '../lib/utils';
 import { DB_ID, FUNCTION_ID, ADMIN_TEAM_ID, AUDIT_COLLECTION, EMPLOYEE_COLLECTION } from '../lib/constants';
 
 interface HistoryItem {
@@ -32,7 +33,7 @@ export default function Home() {
   const [pwdMsg, setPwdMsg] = useState('');
 
   const addLog = (msg: string) => {
-    const time = new Date().toLocaleTimeString();
+    const time = new Date().toLocaleTimeString(); 
     setLogs(prev => [`[${time}] ${msg}`, ...prev]);
   };
 
@@ -109,7 +110,7 @@ export default function Home() {
       const items = response.documents.map(doc => ({
         id: doc.$id,
         action: doc.action,
-        timestamp: new Date(doc.timestamp).toLocaleString(),
+        timestamp: formatTimestamp(doc.timestamp),
         status: 'verified'
       }));
 

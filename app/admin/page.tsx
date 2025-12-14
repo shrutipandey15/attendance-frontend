@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { databases, functions } from "../../lib/appwrite";
 import { Query, Models, ID } from "appwrite";
+import { formatTimestamp } from "../../lib/utils";
 
 import { 
     DB_ID, 
@@ -79,7 +80,12 @@ type ViewMode = "audit" | "payroll" | "manage";
 export default function AdminDashboard() {
   const [viewMode, setViewMode] = useState<ViewMode>("manage");
   const [reports, setReports] = useState<PayrollReport[]>([]);
+  
   const [employees, setEmployees] = useState<EmployeeProfile[]>([]);
+  const [empPage, setEmpPage] = useState(1);
+  const [empTotal, setEmpTotal] = useState(0);
+  const EMP_LIMIT = 20;
+
   const [holidays, setHolidays] = useState<HolidayDocument[]>([]);
 
   const [logs, setLogs] = useState<ParsedLog[]>([]);
@@ -100,6 +106,30 @@ export default function AdminDashboard() {
   const [newEmpPass, setNewEmpPass] = useState("");
   const [newEmpSalary, setNewEmpSalary] = useState("");
   const [isCreating, setIsCreating] = useState(false);
+
+  const fetchEmployees = async (page: number) => {
+    try {
+      const offset = (page - 1) * EMP_LIMIT;
+      
+      const empRes = await databases.listDocuments<EmployeeProfile>(
+        DB_ID, 
+        EMPLOYEE_COLLECTION,
+        [
+          Query.limit(EMP_LIMIT),
+          Query.offset(offset),
+          Query.orderAsc("name"),
+        ]
+      );
+
+      setEmployees(empRes.documents);
+      setEmpTotal(empRes.total);
+      setEmpPage(page);
+
+    } catch (error) {
+      console.error("Failed to fetch employee list", error);
+    }
+  };
+
 
   const fetchAuditLogs = async (page: number) => {
     try {
@@ -134,14 +164,12 @@ export default function AdminDashboard() {
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      const [empRes, holRes] = await Promise.all([
-        databases.listDocuments<EmployeeProfile>(DB_ID, EMPLOYEE_COLLECTION),
+      const [holRes] = await Promise.all([
         databases.listDocuments<HolidayDocument>(DB_ID, HOLIDAY_COLLECTION, [
           Query.orderDesc("date"),
         ]),
       ]);
 
-      setEmployees(empRes.documents);
       setHolidays(holRes.documents);
 
       const payrollExecution = await functions.createExecution(
@@ -161,7 +189,6 @@ export default function AdminDashboard() {
     } catch (error) {
       console.error(error);
     } finally {
-      setIsLoading(false);
     }
   };
 
@@ -171,9 +198,13 @@ export default function AdminDashboard() {
   
   useEffect(() => {
     if (viewMode === 'audit') {
-        fetchAuditLogs(auditPage);
+        fetchAuditLogs(auditPage); 
     }
-  }, [auditPage, viewMode]);
+    if (viewMode === 'manage') {
+        fetchEmployees(empPage);
+    }
+    setIsLoading(false); 
+  }, [auditPage, viewMode, empPage]);
 
 
   const createEmployee = async (e: React.FormEvent) => {
@@ -196,9 +227,12 @@ const res = await functions.createExecution(
 );      const result = JSON.parse(res.responseBody);
       if (result.success) {
         alert(`✅ Created: ${result.userId}`);
+        fetchEmployees(1);
         fetchData();
         setNewEmpName("");
         setNewEmpEmail("");
+        setNewEmpPass("");
+        setNewEmpSalary("");
       } else throw new Error(result.message || result.error); 
     } catch (err: unknown) {
       alert("Error: " + (err instanceof Error ? err.message : "Unknown error"));
@@ -209,17 +243,17 @@ const res = await functions.createExecution(
 
   const resetDevice = async (id: string, name: string) => {
     if (!confirm(`Reset device for ${name}?`)) return;
-    await databases.updateDocument(DB_ID, EMPLOYEE_COLLECTION, id, { // 👈 USING CONSTANT
+    await databases.updateDocument(DB_ID, EMPLOYEE_COLLECTION, id, {
       devicePublicKey: null,
       deviceFingerprint: null,
     });
     alert("✅ Reset");
-    fetchData();
+    fetchEmployees(empPage);
   };
 
   const addHoliday = async () => {
     try {
-      await databases.createDocument(DB_ID, HOLIDAY_COLLECTION, ID.unique(), { // 👈 USING CONSTANT
+      await databases.createDocument(DB_ID, HOLIDAY_COLLECTION, ID.unique(), {
         date: newHolidayDate,
         name: newHolidayName,
       });
@@ -232,7 +266,7 @@ const res = await functions.createExecution(
 
   const grantLeave = async () => {
     try {
-      await databases.createDocument(DB_ID, LEAVE_COLLECTION, ID.unique(), { // 👈 USING CONSTANT
+      await databases.createDocument(DB_ID, LEAVE_COLLECTION, ID.unique(), {
         employeeId: leaveEmpId,
         date: leaveDate,
         type: leaveType,
@@ -322,7 +356,9 @@ const res = await functions.createExecution(
             </div>
 
             <div className="bg-white p-6 rounded shadow border">
-              <h2 className="font-bold text-lg mb-4">🔐 Device Reset</h2>
+              <h2 className="font-bold text-lg mb-4">
+                🔐 Device Reset (Showing {employees.length} of {empTotal} Employees)
+              </h2>
               <div className="max-h-96 overflow-y-auto divide-y">
                 {employees.map((e) => (
                   <div
@@ -342,6 +378,28 @@ const res = await functions.createExecution(
                     )}
                   </div>
                 ))}
+              </div>
+              
+              <div className="flex justify-between items-center mt-4 pt-4 border-t">
+                <p className="text-gray-600 text-xs font-medium">
+                    Page {empPage} of {Math.ceil(empTotal / EMP_LIMIT)}
+                </p>
+                <div className="flex gap-2">
+                    <button 
+                        onClick={() => setEmpPage(empPage - 1)}
+                        disabled={empPage === 1}
+                        className="px-3 py-1 bg-blue-50 text-blue-700 rounded text-sm font-bold disabled:opacity-50"
+                    >
+                        Previous
+                    </button>
+                    <button 
+                        onClick={() => setEmpPage(empPage + 1)} 
+                        disabled={empPage * EMP_LIMIT >= empTotal}
+                        className="px-3 py-1 bg-blue-50 text-blue-700 rounded text-sm font-bold disabled:opacity-50"
+                    >
+                        Next
+                    </button>
+                </div>
               </div>
             </div>
 
@@ -374,6 +432,7 @@ const res = await functions.createExecution(
                   onChange={(e) => setLeaveEmpId(e.target.value)}
                 >
                   <option value="">Employee</option>
+                  {/* NOTE: This list now uses the paginated 'employees' list */}
                   {employees.map((e) => (
                     <option key={e.$id} value={e.$id}>
                       {e.name}
@@ -475,15 +534,7 @@ const res = await functions.createExecution(
                               className={`px-2 py-0.5 rounded text-xs font-bold uppercase ${
                                 d.status === "Present"
                                   ? "bg-green-100 text-green-700"
-                                  : d.status === "Absent"
-                                  ? "bg-red-100 text-red-700"
-                                  : d.status === "Half-Day"
-                                  ? "bg-yellow-100 text-yellow-700"
-                                  : d.status === "Weekend"
-                                  ? "bg-gray-100 text-gray-500"
-                                  : d.status === "Pre-Employment"
-                                  ? "bg-slate-200 text-slate-600"
-                                  : "bg-blue-100 text-blue-700"
+                                  : "bg-red-100 text-red-700"
                               }`}
                             >
                               {d.status}
@@ -551,7 +602,7 @@ const res = await functions.createExecution(
                 {logs.map((log) => (
                   <tr key={log.$id} className="hover:bg-gray-50">
                     <td className="p-3 text-gray-600">
-                      {new Date(log.timestamp).toLocaleString()}
+                      {formatTimestamp(log.timestamp)} 
                     </td>
                     <td className="p-3 font-bold">{log.employeeName}</td>
                     <td className="p-3 uppercase font-bold text-xs tracking-wider">
