@@ -3,6 +3,15 @@ import { useEffect, useState } from "react";
 import { databases, functions } from "../../lib/appwrite";
 import { Query, Models, ID } from "appwrite";
 
+import { 
+    DB_ID, 
+    FUNCTION_ID, 
+    EMPLOYEE_COLLECTION, 
+    AUDIT_COLLECTION,
+    HOLIDAY_COLLECTION,
+    LEAVE_COLLECTION 
+} from '../../lib/constants'; 
+
 interface AuditLogDocument extends Models.Document {
   timestamp: string;
   actorId: string;
@@ -76,6 +85,10 @@ export default function AdminDashboard() {
   const [logs, setLogs] = useState<ParsedLog[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditTotal, setAuditTotal] = useState(0);
+  const AUDIT_LIMIT = 20;
+
   const [newHolidayDate, setNewHolidayDate] = useState("");
   const [newHolidayName, setNewHolidayName] = useState("");
   const [leaveEmpId, setLeaveEmpId] = useState("");
@@ -88,30 +101,18 @@ export default function AdminDashboard() {
   const [newEmpSalary, setNewEmpSalary] = useState("");
   const [isCreating, setIsCreating] = useState(false);
 
-  const DB_ID = "693d2c7a002d224e1d81";
-  const FUNCTION_ID = "693d43f9002a766e0d81";
-
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  const fetchData = async () => {
-    setIsLoading(true);
+  const fetchAuditLogs = async (page: number) => {
     try {
-      const [empRes, holRes] = await Promise.all([
-        databases.listDocuments<EmployeeProfile>(DB_ID, "employees"),
-        databases.listDocuments<HolidayDocument>(DB_ID, "holidays", [
-          Query.orderDesc("date"),
-        ]),
-      ]);
-
-      setEmployees(empRes.documents);
-      setHolidays(holRes.documents);
-
+      const offset = (page - 1) * AUDIT_LIMIT;
+      
       const auditLogRes = await databases.listDocuments<AuditLogDocument>(
         DB_ID,
-        "audit",
-        [Query.limit(500), Query.orderDesc("timestamp")]
+        AUDIT_COLLECTION,
+        [
+          Query.limit(AUDIT_LIMIT),
+          Query.offset(offset),
+          Query.orderDesc("timestamp"),
+        ]
       );
       
       const parsedLogs: ParsedLog[] = auditLogRes.documents.map((doc) => {
@@ -121,7 +122,27 @@ export default function AdminDashboard() {
         } catch (e) {}
         return { ...doc, ...details };
       });
+      
       setLogs(parsedLogs);
+      setAuditTotal(auditLogRes.total);
+      setAuditPage(page);
+    } catch (error) {
+      console.error("Failed to fetch audit logs", error);
+    }
+  };
+
+  const fetchData = async () => {
+    setIsLoading(true);
+    try {
+      const [empRes, holRes] = await Promise.all([
+        databases.listDocuments<EmployeeProfile>(DB_ID, EMPLOYEE_COLLECTION),
+        databases.listDocuments<HolidayDocument>(DB_ID, HOLIDAY_COLLECTION, [
+          Query.orderDesc("date"),
+        ]),
+      ]);
+
+      setEmployees(empRes.documents);
+      setHolidays(holRes.documents);
 
       const payrollExecution = await functions.createExecution(
         FUNCTION_ID,
@@ -143,6 +164,17 @@ export default function AdminDashboard() {
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+  
+  useEffect(() => {
+    if (viewMode === 'audit') {
+        fetchAuditLogs(auditPage);
+    }
+  }, [auditPage, viewMode]);
+
 
   const createEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -177,7 +209,7 @@ const res = await functions.createExecution(
 
   const resetDevice = async (id: string, name: string) => {
     if (!confirm(`Reset device for ${name}?`)) return;
-    await databases.updateDocument(DB_ID, "employees", id, {
+    await databases.updateDocument(DB_ID, EMPLOYEE_COLLECTION, id, { // 👈 USING CONSTANT
       devicePublicKey: null,
       deviceFingerprint: null,
     });
@@ -187,7 +219,7 @@ const res = await functions.createExecution(
 
   const addHoliday = async () => {
     try {
-      await databases.createDocument(DB_ID, "holidays", ID.unique(), {
+      await databases.createDocument(DB_ID, HOLIDAY_COLLECTION, ID.unique(), { // 👈 USING CONSTANT
         date: newHolidayDate,
         name: newHolidayName,
       });
@@ -200,7 +232,7 @@ const res = await functions.createExecution(
 
   const grantLeave = async () => {
     try {
-      await databases.createDocument(DB_ID, "leaves", ID.unique(), {
+      await databases.createDocument(DB_ID, LEAVE_COLLECTION, ID.unique(), { // 👈 USING CONSTANT
         employeeId: leaveEmpId,
         date: leaveDate,
         type: leaveType,
@@ -237,7 +269,13 @@ const res = await functions.createExecution(
           </div>
         </div>
 
-        {viewMode === "manage" && (
+        {isLoading && (
+             <div className="text-center p-10 text-lg font-semibold text-gray-500">
+                Loading Data...
+            </div>
+        )}
+
+        {!isLoading && viewMode === "manage" && (
           <div className="grid md:grid-cols-2 gap-6">
             <div className="bg-white p-6 rounded shadow border col-span-2">
               <h2 className="font-bold text-lg mb-4 text-purple-800">
@@ -260,6 +298,7 @@ const res = await functions.createExecution(
                 />
                 <input
                   placeholder="Pass"
+                  type="password"
                   className="border p-2 rounded w-full"
                   value={newEmpPass}
                   onChange={(e) => setNewEmpPass(e.target.value)}
@@ -284,24 +323,26 @@ const res = await functions.createExecution(
 
             <div className="bg-white p-6 rounded shadow border">
               <h2 className="font-bold text-lg mb-4">🔐 Device Reset</h2>
-              {employees.map((e) => (
-                <div
-                  key={e.$id}
-                  className="flex justify-between items-center py-2 border-b"
-                >
-                  <span>{e.name}</span>
-                  {e.deviceFingerprint ? (
-                    <button
-                      onClick={() => resetDevice(e.$id, e.name)}
-                      className="text-red-600 text-xs bg-red-50 px-2 py-1 rounded font-bold border border-red-100"
-                    >
-                      ⚠️ RESET KEY
-                    </button>
-                  ) : (
-                    <span className="text-gray-400 text-xs">No Device</span>
-                  )}
-                </div>
-              ))}
+              <div className="max-h-96 overflow-y-auto divide-y">
+                {employees.map((e) => (
+                  <div
+                    key={e.$id}
+                    className="flex justify-between items-center py-2 border-b"
+                  >
+                    <span>{e.name}</span>
+                    {e.deviceFingerprint ? (
+                      <button
+                        onClick={() => resetDevice(e.$id, e.name)}
+                        className="text-red-600 text-xs bg-red-50 px-2 py-1 rounded font-bold border border-red-100"
+                      >
+                        ⚠️ RESET KEY
+                      </button>
+                    ) : (
+                      <span className="text-gray-400 text-xs">No Device</span>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div className="bg-white p-6 rounded shadow border">
@@ -441,7 +482,7 @@ const res = await functions.createExecution(
                                   : d.status === "Weekend"
                                   ? "bg-gray-100 text-gray-500"
                                   : d.status === "Pre-Employment"
-                                  ? "bg-gray-300 text-gray-600"
+                                  ? "bg-slate-200 text-slate-600"
                                   : "bg-blue-100 text-blue-700"
                               }`}
                             >
@@ -474,13 +515,36 @@ const res = await functions.createExecution(
 
         {viewMode === "audit" && (
           <div className="bg-white rounded shadow overflow-hidden">
+            
+            <div className="flex justify-between items-center p-3 bg-gray-100 border-b">
+                <p className="text-gray-600 text-sm font-medium">
+                    Page {auditPage} of {Math.ceil(auditTotal / AUDIT_LIMIT)} ({auditTotal} total records)
+                </p>
+                <div className="flex gap-2">
+                    <button 
+                        onClick={() => setAuditPage(auditPage - 1)}
+                        disabled={auditPage === 1}
+                        className="px-3 py-1 bg-blue-50 text-blue-700 rounded text-sm font-bold disabled:opacity-50"
+                    >
+                        Previous
+                    </button>
+                    <button 
+                        onClick={() => setAuditPage(auditPage + 1)} 
+                        disabled={auditPage * AUDIT_LIMIT >= auditTotal}
+                        className="px-3 py-1 bg-blue-50 text-blue-700 rounded text-sm font-bold disabled:opacity-50"
+                    >
+                        Next
+                    </button>
+                </div>
+            </div>
+            
             <table className="w-full text-left text-sm">
               <thead className="bg-gray-100 text-gray-500 uppercase">
                 <tr>
                   <th className="p-3">Time</th>
                   <th className="p-3">Employee</th>
                   <th className="p-3">Action</th>
-                  <th className="p-3">Device</th>
+                  <th className="p-3">Device Fingerprint</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -502,7 +566,7 @@ const res = await functions.createExecution(
                       </span>
                     </td>
                     <td className="p-3 font-mono text-xs text-gray-500">
-                      {log.device} 
+                      {log.device}
                     </td>
                   </tr>
                 ))}

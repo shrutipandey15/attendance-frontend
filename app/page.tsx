@@ -1,9 +1,10 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { account, databases, functions, teams } from '../lib/appwrite';
-import { generateDeviceKeys, isDeviceBound, signData, deleteDeviceKeys } from '../lib/crypto'; // 👈 Imported deleteDeviceKeys
+import { generateDeviceKeys, isDeviceBound, signData, deleteDeviceKeys } from '../lib/crypto';
 import { Query, Models } from 'appwrite';
 import { useRouter } from 'next/navigation';
+import { DB_ID, FUNCTION_ID, ADMIN_TEAM_ID, AUDIT_COLLECTION, EMPLOYEE_COLLECTION } from '../lib/constants';
 
 interface HistoryItem {
   id: string;
@@ -29,10 +30,6 @@ export default function Home() {
   const [oldPwd, setOldPwd] = useState('');
   const [newPwd, setNewPwd] = useState('');
   const [pwdMsg, setPwdMsg] = useState('');
-
-  const DB_ID = '693d2c7a002d224e1d81';
-  const FUNCTION_ID = '693d43f9002a766e0d81';
-  const ADMIN_TEAM_ID = '693ecaa0002778dea17d'; 
 
   const addLog = (msg: string) => {
     const time = new Date().toLocaleTimeString();
@@ -78,7 +75,7 @@ export default function Home() {
     try {
       const lastLog = await databases.listDocuments(
         DB_ID, 
-        'audit', 
+        AUDIT_COLLECTION,
         [
           Query.equal('actorId', userId),
           Query.orderDesc('timestamp'),
@@ -101,7 +98,7 @@ export default function Home() {
     try {
       const response = await databases.listDocuments(
         DB_ID,
-        'audit',
+        AUDIT_COLLECTION,
         [
           Query.equal('actorId', userId),
           Query.orderDesc('timestamp'),
@@ -148,9 +145,9 @@ export default function Home() {
       if (!isBound) {
         addLog("⚙️ Binding Device...");
         const publicKey = await generateDeviceKeys();
-        const docs = await databases.listDocuments(DB_ID, 'employees', [Query.equal('email', user.email)]);
+        const docs = await databases.listDocuments(DB_ID, EMPLOYEE_COLLECTION, [Query.equal('email', user.email)]);
         if(docs.total > 0) {
-            await databases.updateDocument(DB_ID, 'employees', docs.documents[0].$id, { 
+            await databases.updateDocument(DB_ID, EMPLOYEE_COLLECTION, docs.documents[0].$id, { 
                 devicePublicKey: publicKey,
                 deviceFingerprint: navigator.userAgent 
             });
