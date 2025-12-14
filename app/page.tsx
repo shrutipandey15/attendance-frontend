@@ -1,8 +1,9 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { account, databases, functions } from '../lib/appwrite';
-import { generateDeviceKeys, isDeviceBound, signData } from '../lib/crypto';
+import { account, databases, functions, teams } from '../lib/appwrite';
+import { generateDeviceKeys, isDeviceBound, signData, deleteDeviceKeys } from '../lib/crypto'; // 👈 Imported deleteDeviceKeys
 import { Query, Models } from 'appwrite';
+import { useRouter } from 'next/navigation';
 
 interface HistoryItem {
   id: string;
@@ -12,6 +13,7 @@ interface HistoryItem {
 }
 
 export default function Home() {
+  const router = useRouter(); 
   const [view, setView] = useState<'login' | 'dashboard'>('login');
   const [loading, setLoading] = useState(true);
   const [logs, setLogs] = useState<string[]>([]);
@@ -30,6 +32,7 @@ export default function Home() {
 
   const DB_ID = '693d2c7a002d224e1d81';
   const FUNCTION_ID = '693d43f9002a766e0d81';
+  const ADMIN_TEAM_ID = '693ecaa0002778dea17d'; 
 
   const addLog = (msg: string) => {
     const time = new Date().toLocaleTimeString();
@@ -44,6 +47,18 @@ export default function Home() {
     try {
       const activeUser = await account.get();
       setUser(activeUser);
+      try {
+        const teamList = await teams.list();
+        const isAdmin = teamList.teams.some(t => t.$id === ADMIN_TEAM_ID);
+        
+        if (isAdmin) {
+            addLog("⚡ Admin detected! Redirecting...");
+            router.push('/admin');
+            return;
+        }
+      } catch (e) {
+        console.log("Not an admin or team check failed", e);
+      }
       addLog(`👋 Welcome back, ${activeUser.name}`);
       
       await Promise.all([
@@ -129,7 +144,7 @@ export default function Home() {
       const intent = currentStatus === 'checked-in' ? 'check-out' : 'check-in';
       addLog(`🚀 Initiating ${intent.toUpperCase()}...`);
 
-      const isBound = await isDeviceBound();
+      let isBound = await isDeviceBound();
       if (!isBound) {
         addLog("⚙️ Binding Device...");
         const publicKey = await generateDeviceKeys();
@@ -140,6 +155,7 @@ export default function Home() {
                 deviceFingerprint: navigator.userAgent 
             });
         }
+        isBound = true;
       }
 
       const today = new Date().toISOString().split('T')[0];
@@ -165,6 +181,13 @@ export default function Home() {
         await fetchHistory(user.$id); 
       } else {
         addLog(`❌ Failed: ${response.message}`);
+        
+        if (response.message.includes("Device not registered")) {
+           await deleteDeviceKeys();
+           addLog("⚠️ Key mismatch detected. Keys cleared. Please try again to re-bind.");
+           alert("Security Reset: Please click the Check-in/Check-out button again to re-bind your device.");
+           await checkSession();
+        }
       }
 
     } catch (error: unknown) {

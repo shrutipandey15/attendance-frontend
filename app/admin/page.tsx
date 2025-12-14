@@ -24,6 +24,7 @@ interface EmployeeProfile extends Models.Document {
   email: string;
   salaryMonthly: number;
   deviceFingerprint?: string;
+  joinDate: string;
 }
 
 type DailyStatus =
@@ -32,7 +33,8 @@ type DailyStatus =
   | "Half-Day"
   | "Weekend"
   | "Holiday"
-  | "Leave";
+  | "Leave"
+  | "Pre-Employment";
 
 interface DailyRecord {
   date: string;
@@ -96,24 +98,23 @@ export default function AdminDashboard() {
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      const [empRes, logRes, holRes, leaveRes] = await Promise.all([
+      const [empRes, holRes] = await Promise.all([
         databases.listDocuments<EmployeeProfile>(DB_ID, "employees"),
-        databases.listDocuments<AuditLogDocument>(DB_ID, "audit", [
-          Query.limit(500),
-          Query.orderDesc("timestamp"),
-        ]),
         databases.listDocuments<HolidayDocument>(DB_ID, "holidays", [
           Query.orderDesc("date"),
-        ]),
-        databases.listDocuments<LeaveDocument>(DB_ID, "leaves", [
-          Query.equal("status", "Approved"),
         ]),
       ]);
 
       setEmployees(empRes.documents);
       setHolidays(holRes.documents);
 
-      const parsedLogs: ParsedLog[] = logRes.documents.map((doc) => {
+      const auditLogRes = await databases.listDocuments<AuditLogDocument>(
+        DB_ID,
+        "audit",
+        [Query.limit(500), Query.orderDesc("timestamp")]
+      );
+      
+      const parsedLogs: ParsedLog[] = auditLogRes.documents.map((doc) => {
         let details = { employeeName: "Unknown", device: "Unknown" };
         try {
           details = JSON.parse(doc.payload);
@@ -122,16 +123,20 @@ export default function AdminDashboard() {
       });
       setLogs(parsedLogs);
 
-      setReports(
-        empRes.documents.map((emp) =>
-          calculatePayroll(
-            emp,
-            logRes.documents,
-            holRes.documents,
-            leaveRes.documents
-          )
-        )
+      const payrollExecution = await functions.createExecution(
+        FUNCTION_ID,
+        JSON.stringify({ action: "get_payroll_report" }),
+        false
       );
+      
+      const payrollResponse = JSON.parse(payrollExecution.responseBody);
+      
+      if (payrollResponse.success) {
+          setReports(payrollResponse.reports);
+      } else {
+          console.error("Failed to get payroll report:", payrollResponse.message);
+      }
+      
     } catch (error) {
       console.error(error);
     } finally {
@@ -162,7 +167,7 @@ const res = await functions.createExecution(
         fetchData();
         setNewEmpName("");
         setNewEmpEmail("");
-      } else throw new Error(result.error);
+      } else throw new Error(result.message || result.error); 
     } catch (err: unknown) {
       alert("Error: " + (err instanceof Error ? err.message : "Unknown error"));
     } finally {
@@ -206,139 +211,6 @@ const res = await functions.createExecution(
     } catch (err: unknown) {
       alert((err as Error).message);
     }
-  };
-
-  const calculatePayroll = (
-    emp: EmployeeProfile,
-    allLogs: AuditLogDocument[],
-    holidays: HolidayDocument[],
-    leaves: LeaveDocument[]
-  ): PayrollReport => {
-    const today = new Date();
-    const daysInMonth = new Date(
-      today.getFullYear(),
-      today.getMonth() + 1,
-      0
-    ).getDate();
-    const records = [];
-    let present = 0,
-      absent = 0,
-      half = 0,
-      hol = 0,
-      lev = 0,
-      workDays = 0;
-
-    const empLogs = allLogs.filter((l) => l.actorId === emp.$id);
-    const empLeaves = leaves.filter((l) => l.employeeId === emp.$id);
-
-    for (let d = 1; d <= daysInMonth; d++) {
-      const date = new Date(today.getFullYear(), today.getMonth(), d);
-      if (date > new Date()) continue;
-      const dateStr = date.toISOString().split("T")[0];
-      const isSun = date.getDay() === 0;
-      const holiday = holidays.find((h) => h.date === dateStr);
-      const leave = empLeaves.find((l) => l.date === dateStr);
-      const logs = empLogs
-        .filter((l) => l.timestamp.startsWith(dateStr))
-        .sort(
-          (a, b) =>
-            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-        );
-
-      let status: DailyStatus = isSun
-        ? "Weekend"
-        : holiday
-        ? "Holiday"
-        : leave
-        ? "Leave"
-        : "Absent";
-      let notes = holiday?.name || leave?.type || "";
-      let dur = 0,
-        ot = 0,
-        inT = "-",
-        outT = "-";
-
-      if (!isSun && !holiday) workDays++;
-
-      if (logs.length > 0) {
-        inT = new Date(logs[0].timestamp).toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-        });
-
-        if (logs.at(-1)?.action === "check-out") {
-          outT = new Date(logs.at(-1)!.timestamp).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          });
-          dur =
-            (new Date(logs.at(-1)!.timestamp).getTime() -
-              new Date(logs[0].timestamp).getTime()) /
-            3600000;
-
-          if (isSun || holiday) {
-            status = "Present";
-            present++;
-            ot = dur;
-            notes = isSun ? "Sunday OT" : `Holiday Work`;
-          } else {
-            if (dur > 0 && dur < 4) {
-              status = "Half-Day";
-              half++;
-            } else {
-              status = "Present";
-              present++;
-            }
-            if (dur > 10) ot = dur - 10;
-          }
-        } else {
-          outT = "⚠️ Missed";
-          dur = 0;
-          
-          if (isSun || holiday) {
-             notes = notes ? `${notes} (Missed Check-out)` : "Missed Check-out";
-          } else {
-             status = "Absent";
-             absent++;
-             notes = "❌ Forgot Check-out (0 Pay)";
-          }
-        }
-      } else {
-        if (status === "Holiday") hol++;
-        else if (status === "Leave") lev++;
-        else if (status === "Absent" && !isSun) absent++;
-      }
-
-      records.push({
-        date: dateStr,
-        day: date.toLocaleDateString("en-US", { weekday: "short" }),
-        status,
-        inT,
-        outT,
-        dur,
-        ot,
-        notes,
-      });
-    }
-
-    const rate = workDays > 0 ? emp.salaryMonthly / workDays : 0;
-    const net = Math.max(
-      0,
-      emp.salaryMonthly - absent * rate - half * 0.5 * rate
-    );
-
-    return {
-      employeeId: emp.$id,
-      employeeName: emp.name,
-      month: today.toLocaleDateString("en-US", { month: "long" }),
-      netSalary: net.toLocaleString("en-IN", { maximumFractionDigits: 2 }),
-      presentDays: present,
-      absentDays: absent,
-      holidayDays: hol,
-      paidLeaveDays: lev,
-      halfDays: half,
-      dailyBreakdown: records,
-    };
   };
 
   const TABS: ViewMode[] = ["manage", "payroll", "audit"];
@@ -568,6 +440,8 @@ const res = await functions.createExecution(
                                   ? "bg-yellow-100 text-yellow-700"
                                   : d.status === "Weekend"
                                   ? "bg-gray-100 text-gray-500"
+                                  : d.status === "Pre-Employment"
+                                  ? "bg-gray-300 text-gray-600"
                                   : "bg-blue-100 text-blue-700"
                               }`}
                             >
@@ -628,7 +502,7 @@ const res = await functions.createExecution(
                       </span>
                     </td>
                     <td className="p-3 font-mono text-xs text-gray-500">
-                      {log.device?.substring(0, 30)}...
+                      {log.device} 
                     </td>
                   </tr>
                 ))}
