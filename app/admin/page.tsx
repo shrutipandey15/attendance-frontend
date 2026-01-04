@@ -1,9 +1,10 @@
 "use client";
 import { useEffect, useState } from "react";
-import { databases, functions } from "../../lib/appwrite";
+import { useRouter } from "next/navigation";
+import { databases, functions, account } from "../../lib/appwrite";
 import { Query, Models, ID } from "appwrite";
 import { 
-    ShieldCheckIcon, UserPlusIcon, XCircleIcon, CalendarDaysIcon, CurrencyRupeeIcon, ClipboardDocumentListIcon, ShieldExclamationIcon, ArrowLeftOnRectangleIcon, MagnifyingGlassIcon, PlusCircleIcon, TrashIcon
+    ShieldCheckIcon, UserPlusIcon, XCircleIcon, CalendarDaysIcon, CurrencyRupeeIcon, ClipboardDocumentListIcon, ShieldExclamationIcon, ArrowLeftOnRectangleIcon, MagnifyingGlassIcon, PlusCircleIcon, TrashIcon, Cog6ToothIcon
 } from '@heroicons/react/24/outline'; 
 
 import { 
@@ -15,7 +16,7 @@ import {
     LEAVE_COLLECTION 
 } from '../../lib/constants'; 
 import { formatTimestamp } from '../../lib/utils'; 
-import { addManualLog, deleteLog } from '../../lib/adminService'; // <--- NEW IMPORT
+import { addManualLog, deleteLog } from '../../lib/adminService';
 
 interface AuditLogDocument extends Models.Document {
   timestamp: string;
@@ -79,9 +80,10 @@ interface ParsedLog extends AuditLogDocument {
   device: string;
 }
 
-type ViewMode = "audit" | "payroll" | "manage";
+type ViewMode = "audit" | "payroll" | "manage" | "settings";
 
 export default function AdminDashboard() {
+  const router = useRouter();
   const [viewMode, setViewMode] = useState<ViewMode>("manage");
   const [reports, setReports] = useState<PayrollReport[]>([]);
   
@@ -118,6 +120,10 @@ export default function AdminDashboard() {
   const [manualDate, setManualDate] = useState("");
   const [manualAction, setManualAction] = useState<"check-in" | "check-out">("check-in");
   const [isManualSubmitting, setIsManualSubmitting] = useState(false);
+
+  const [oldPass, setOldPass] = useState("");
+  const [newPass, setNewPass] = useState("");
+  const [isUpdatingAuth, setIsUpdatingAuth] = useState(false);
 
   const selectedReport = reports.find(r => r.employeeId === selectedReportId);
 
@@ -289,8 +295,30 @@ export default function AdminDashboard() {
       alert((err as Error).message);
     }
   };
+  const handleLogout = async () => {
+    try {
+      await account.deleteSession('current');
+      router.push('/'); // Redirect to Login Page
+    } catch (error) {
+      alert("Logout failed: " + (error as Error).message);
+    }
+  };
 
-  const TABS: ViewMode[] = ["manage", "payroll", "audit"];
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsUpdatingAuth(true);
+    try {
+        await account.updatePassword(newPass, oldPass);
+        alert("✅ Password Updated! Please login again.");
+        handleLogout(); // Force logout so they login with new password
+    } catch (error) {
+        alert("Error: " + (error as Error).message);
+    } finally {
+        setIsUpdatingAuth(false);
+    }
+  };
+
+  const TABS: ViewMode[] = ["manage", "payroll", "audit", "settings"];
 
   return (
     <div className="min-h-screen bg-slate-900 p-8 font-sans text-gray-100">
@@ -301,18 +329,33 @@ export default function AdminDashboard() {
             <ShieldCheckIcon className="w-8 h-8 text-cyan-500" />
             Security Admin Panel
           </h1>
-          <div className="flex bg-slate-800 rounded-lg p-1 shadow-inner border border-slate-700">
-            {TABS.map((m) => (
-              <button
-                key={m}
-                onClick={() => setViewMode(m)}
-                className={`px-5 py-2 rounded-md capitalize text-sm font-semibold transition-colors ${
-                  viewMode === m ? "bg-cyan-600 text-white shadow-md" : "text-slate-400 hover:bg-slate-700"
-                }`}
-              >
-                {m}
-              </button>
-            ))}
+          
+          <div className="flex gap-4 items-center">
+            {/* Tabs */}
+            <div className="flex bg-slate-800 rounded-lg p-1 shadow-inner border border-slate-700">
+                {TABS.map((m) => (
+                <button
+                    key={m}
+                    onClick={() => setViewMode(m as ViewMode)}
+                    className={`px-4 py-2 rounded-md capitalize text-sm font-semibold transition-colors flex items-center gap-2 ${
+                    viewMode === m ? "bg-cyan-600 text-white shadow-md" : "text-slate-400 hover:bg-slate-700"
+                    }`}
+                >
+                    {/* Optional: Add Icons for tabs here if you want */}
+                    {m === 'settings' && <Cog6ToothIcon className="w-4 h-4" />}
+                    {m}
+                </button>
+                ))}
+            </div>
+
+            {/* Logout Button */}
+            <button 
+                onClick={handleLogout}
+                className="bg-red-900/20 hover:bg-red-900/50 text-red-400 border border-red-900/50 p-2 rounded-lg transition"
+                title="Logout"
+            >
+                <ArrowLeftOnRectangleIcon className="w-6 h-6" />
+            </button>
           </div>
         </div>
 
@@ -559,6 +602,61 @@ export default function AdminDashboard() {
               </tbody>
             </table>
           </div>
+        )}
+
+        {!isLoading && viewMode === "settings" && (
+            <div className="max-w-2xl mx-auto">
+                <div className="bg-slate-800 p-8 rounded-xl shadow-lg border border-slate-700">
+                    <h2 className="font-extrabold text-2xl mb-6 text-slate-200 flex items-center gap-3 border-b border-slate-700 pb-4">
+                        <Cog6ToothIcon className="w-7 h-7 text-slate-400" />
+                        Admin Account Settings
+                    </h2>
+                    
+                    <div className="bg-slate-900/50 p-6 rounded-lg border border-slate-700">
+                        <h3 className="text-lg font-bold text-cyan-400 mb-4">Change Password</h3>
+                        <form onSubmit={handleUpdatePassword} className="space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Current Password</label>
+                                <input 
+                                    type="password" 
+                                    required 
+                                    className="w-full bg-slate-800 border border-slate-600 rounded p-3 text-white focus:border-cyan-500 outline-none transition"
+                                    placeholder="Enter your current password"
+                                    value={oldPass}
+                                    onChange={(e) => setOldPass(e.target.value)}
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">New Password</label>
+                                <input 
+                                    type="password" 
+                                    required 
+                                    minLength={8}
+                                    className="w-full bg-slate-800 border border-slate-600 rounded p-3 text-white focus:border-cyan-500 outline-none transition"
+                                    placeholder="Enter new secure password"
+                                    value={newPass}
+                                    onChange={(e) => setNewPass(e.target.value)}
+                                />
+                            </div>
+                            <div className="pt-2">
+                                <button 
+                                    disabled={isUpdatingAuth}
+                                    className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-3 rounded-lg transition shadow-lg disabled:opacity-50"
+                                >
+                                    {isUpdatingAuth ? "Updating..." : "Update Password"}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div className="mt-8 pt-6 border-t border-slate-700 text-center">
+                        <p className="text-slate-500 text-sm mb-4">Need to sign out securely?</p>
+                        <button onClick={handleLogout} className="text-red-400 hover:text-red-300 font-bold text-sm flex items-center justify-center gap-2 mx-auto">
+                            <ArrowLeftOnRectangleIcon className="w-4 h-4" /> Sign Out Now
+                        </button>
+                    </div>
+                </div>
+            </div>
         )}
 
       </div>
