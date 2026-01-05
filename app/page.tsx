@@ -183,17 +183,14 @@ export default function Home() {
         await fetchHistory(user.$id); 
       } else {
         addLog(`❌ Failed: ${response.message}`);
-        
-        if (response.message.includes("Device not registered")) {
-           await deleteDeviceKeys();
-           addLog("⚠️ Key mismatch detected. Keys cleared. Please try again to re-bind.");
-           alert("Security Reset: Please click the Check-in/Check-out button again to re-bind your device.");
-           await checkSession();
+        if(response.message.includes("Device mismatch")) {
+            addLog("🔧 Attempting device re-binding...");
+            await deleteDeviceKeys();
+            window.location.reload();
         }
       }
-
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
       addLog(`🚨 An error occurred: ${errorMessage}`);
     } finally {
       setLoading(false);
@@ -223,19 +220,20 @@ export default function Home() {
   if (loading && view === 'login') return <div className="p-10 text-center font-mono text-slate-400 bg-slate-900 min-h-screen">Initializing Secure Environment...</div>;
 
   return (
-<div className="h-full w-full overflow-y-auto bg-slate-900 flex items-center justify-center p-4 relative overscroll-none">
+<div className="h-full w-full overflow-y-auto bg-slate-900 flex items-center justify-center p-3 sm:p-4 relative overscroll-none">
       {view === 'dashboard' && (
-         <div className="absolute top-4 right-4 flex items-center gap-3">
+         <div className="absolute top-3 sm:top-4 right-3 sm:right-4 flex items-center gap-2 sm:gap-3 z-10">
              <button 
                 onClick={() => setShowPwdModal(true)} 
-                className="flex items-center gap-2 text-sm font-bold text-slate-400 hover:text-cyan-400 transition bg-slate-800 px-4 py-2 rounded-full shadow-md border border-slate-700"
+                className="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm font-bold text-slate-400 hover:text-cyan-400 transition bg-slate-800 px-3 sm:px-4 py-2 rounded-full shadow-md border border-slate-700 active:scale-95"
              >
-                <PencilSquareIcon className="w-4 h-4" />
-                Change Pass
+                <PencilSquareIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                <span className="hidden sm:inline">Change Pass</span>
+                <span className="sm:hidden">Pass</span>
              </button>
              <button 
                 onClick={() => { account.deleteSession('current'); setView('login'); }} 
-                className="text-sm font-bold text-red-400 hover:text-red-500 underline decoration-2 underline-offset-4"
+                className="text-xs sm:text-sm font-bold text-red-400 hover:text-red-500 underline decoration-2 underline-offset-4 active:scale-95 transition"
              >
                 Logout
              </button>
@@ -243,9 +241,9 @@ export default function Home() {
       )}
 
       {view === 'login' ? (
-        <div className="w-full max-w-md bg-slate-800 p-8 rounded-xl shadow-2xl border border-slate-700">
-          <h1 className="text-3xl font-extrabold mb-6 text-white flex items-center gap-3">
-             <ArrowRightOnRectangleIcon className="w-6 h-6 text-cyan-500" />
+        <div className="w-full max-w-md bg-slate-800 p-6 sm:p-8 rounded-xl shadow-2xl border border-slate-700">
+          <h1 className="text-2xl sm:text-3xl font-extrabold mb-5 sm:mb-6 text-white flex items-center gap-2 sm:gap-3">
+             <ArrowRightOnRectangleIcon className="w-5 h-5 sm:w-6 sm:h-6 text-cyan-500" />
              Secure Sign In
           </h1>
           
@@ -256,88 +254,112 @@ export default function Home() {
           )}
 
           <form onSubmit={handleLogin} className="flex flex-col gap-4">
-            <input type="email" placeholder="Email" className="p-3 border border-slate-700 rounded-lg w-full bg-slate-700 text-white placeholder-slate-400 focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400" value={email} onChange={e => setEmail(e.target.value)} required />
-            <input type="password" placeholder="Password" className="p-3 border border-slate-700 rounded-lg w-full bg-slate-700 text-white placeholder-slate-400 focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400" value={password} onChange={e => setPassword(e.target.value)} required />
-            <button disabled={loading} className="bg-cyan-600 text-white p-3 rounded-lg font-bold hover:bg-cyan-700 transition disabled:opacity-50 shadow-md">
+            <input 
+              type="email" 
+              placeholder="Email" 
+              className="p-3 border border-slate-700 rounded-lg w-full bg-slate-700 text-white placeholder-slate-400 focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 text-base" 
+              value={email} 
+              onChange={e => setEmail(e.target.value)} 
+              required 
+            />
+            <input 
+              type="password" 
+              placeholder="Password" 
+              className="p-3 border border-slate-700 rounded-lg w-full bg-slate-700 text-white placeholder-slate-400 focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 text-base" 
+              value={password} 
+              onChange={e => setPassword(e.target.value)} 
+              required 
+            />
+            <button 
+              disabled={loading} 
+              className="bg-cyan-600 text-white p-3 rounded-lg font-bold hover:bg-cyan-700 transition disabled:opacity-50 shadow-md active:scale-95"
+            >
               {loading ? 'Verifying...' : 'Login Securely'}
             </button>
           </form>
         </div>
       ) : (
-        <div className="w-full max-w-md flex flex-col items-center gap-8 mt-10">
+        <div className="w-full max-w-md flex flex-col items-center gap-6 sm:gap-8 mt-6 sm:mt-10 px-3 sm:px-0">
           <div className="text-center">
-            <h1 className="text-4xl font-extrabold text-white">Hello, {user?.name}</h1>
-            <p className="text-slate-400 text-sm mt-2 font-medium flex items-center gap-2">
-                <CalendarDaysIcon className="w-4 h-4 text-cyan-400" />
+            <h1 className="text-2xl sm:text-4xl font-extrabold text-white">Hello, {user?.name}</h1>
+            <p className="text-slate-400 text-xs sm:text-sm mt-2 font-medium flex items-center justify-center gap-2">
+                <CalendarDaysIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400" />
                 Today is {new Date().toDateString()}
             </p>
           </div>
 
+          {/* Mobile: smaller button, Desktop: larger */}
           <button 
             onClick={performAttendance}
             disabled={loading}
-            className={`w-60 h-60 rounded-full border-8 shadow-2xl flex flex-col items-center justify-center transition-all duration-300 transform hover:scale-105 active:scale-95 ${
+            className={`w-44 h-44 sm:w-60 sm:h-60 rounded-full border-4 sm:border-8 shadow-2xl flex flex-col items-center justify-center transition-all duration-300 transform hover:scale-105 active:scale-95 ${
               currentStatus === 'checked-in' 
                 ? 'bg-red-900/40 border-red-700 text-red-400 hover:bg-red-900/60' 
                 : 'bg-green-900/40 border-green-700 text-green-400 hover:bg-green-900/60'
             }`}
           >
-            <span className="text-6xl mb-2">
+            <span className="mb-1 sm:mb-2">
               {currentStatus === 'checked-in' ? (
-                  <ArrowLeftIcon className="w-16 h-16" />
+                  <ArrowLeftIcon className="w-12 h-12 sm:w-16 sm:h-16" />
               ) : (
-                  <ArrowRightIcon className="w-16 h-16" />
+                  <ArrowRightIcon className="w-12 h-12 sm:w-16 sm:h-16" />
               )}
             </span>
-            <span className="font-extrabold text-2xl tracking-wider">
+            <span className="font-extrabold text-lg sm:text-2xl tracking-wider">
               {currentStatus === 'checked-in' ? 'CHECK OUT' : 'CHECK IN'}
             </span>
-            <span className="text-sm uppercase mt-2 font-semibold opacity-60 text-slate-300">
-              {loading ? 'Processing Signature...' : (currentStatus === 'checked-in' ? 'End Shift Now' : 'Start Shift Securely')}
+            <span className="text-xs sm:text-sm uppercase mt-1 sm:mt-2 font-semibold opacity-60 text-slate-300 px-2 text-center">
+              {loading ? 'Processing...' : (currentStatus === 'checked-in' ? 'End Shift' : 'Start Shift')}
             </span>
           </button>
 
-          <div className={`px-6 py-3 rounded-xl font-mono text-base font-bold border shadow-inner ${
+          <div className={`px-4 sm:px-6 py-2.5 sm:py-3 rounded-lg sm:rounded-xl font-mono text-sm sm:text-base font-bold border shadow-inner ${
              currentStatus === 'checked-in' ? 'bg-green-900/50 text-green-400 border-green-800' : 'bg-slate-700 text-cyan-400 border-cyan-800'
           }`}>
-            <ShieldCheckIcon className="w-5 h-5 inline mr-2" />
+            <ShieldCheckIcon className="w-4 h-4 sm:w-5 sm:h-5 inline mr-2" />
             STATUS: {currentStatus === 'checked-in' ? 'CLOCKED IN' : 'CLOCKED OUT'}
           </div>
 
-          <div className="w-full max-w-md bg-slate-800 rounded-xl shadow-lg border border-slate-700 overflow-hidden mt-2">
-            <div className="bg-slate-700 px-4 py-3 border-b border-slate-600 text-sm font-bold text-cyan-400 uppercase tracking-wide flex justify-between items-center">
+          <div className="w-full max-w-md bg-slate-800 rounded-lg sm:rounded-xl shadow-lg border border-slate-700 overflow-hidden mt-2">
+            <div className="bg-slate-700 px-3 sm:px-4 py-2.5 sm:py-3 border-b border-slate-600 text-xs sm:text-sm font-bold text-cyan-400 uppercase tracking-wide flex justify-between items-center">
               <span>Recent Activity</span>
               <span className="text-xs font-normal text-slate-500">{history.length} Logs</span>
             </div>
-            {/* 🛠️ SCROLLABLE SECTION with fixed height for clarity */}
-            <div className="max-h-60 overflow-y-auto custom-scrollbar"> 
+            
+            <div className="max-h-60 sm:max-h-80 overflow-y-auto custom-scrollbar"> 
                 <style jsx global>{`
                     .custom-scrollbar::-webkit-scrollbar {
-                        width: 8px;
+                        width: 6px;
                     }
                     .custom-scrollbar::-webkit-scrollbar-track {
-                        background: #1f2937; /* slate-800 */
+                        background: #1f2937;
                     }
                     .custom-scrollbar::-webkit-scrollbar-thumb {
-                        background-color: #06b6d4; /* cyan-500 */
+                        background-color: #06b6d4;
                         border-radius: 4px;
-                        border: 2px solid #1f2937;
+                        border: 1px solid #1f2937;
+                    }
+                    @media (min-width: 640px) {
+                        .custom-scrollbar::-webkit-scrollbar {
+                            width: 8px;
+                        }
                     }
                 `}</style>
 
                 <div className="divide-y divide-slate-700">
-                  {history.length === 0 && <div className="p-4 text-center text-sm text-slate-500 italic">No history found.</div>}
+                  {history.length === 0 && <div className="p-4 text-center text-xs sm:text-sm text-slate-500 italic">No history found.</div>}
                   {history.map((item) => (
-                    <div key={item.id} className="flex justify-between items-center p-3 hover:bg-slate-700 transition">
+                    <div key={item.id} className="flex justify-between items-center p-2.5 sm:p-3 hover:bg-slate-700 transition">
                       <div className="flex flex-col">
-                        <span className={`text-sm font-bold ${item.action === 'check-in' ? 'text-green-400' : 'text-red-400'}`}>
+                        <span className={`text-xs sm:text-sm font-bold ${item.action === 'check-in' ? 'text-green-400' : 'text-red-400'}`}>
                           {item.action === 'check-in' ? 'Check In' : 'Check Out'}
                         </span>
                         <span className="text-xs text-slate-400">{item.timestamp}</span>
                       </div>
-                      <div className="text-xs bg-slate-900 text-cyan-400 px-3 py-1 rounded-full font-bold border border-cyan-900 flex items-center gap-1">
+                      <div className="text-xs bg-slate-900 text-cyan-400 px-2 sm:px-3 py-1 rounded-full font-bold border border-cyan-900 flex items-center gap-1">
                         <ShieldCheckIcon className="w-3 h-3" />
-                        VERIFIED
+                        <span className="hidden sm:inline">VERIFIED</span>
+                        <span className="sm:hidden">✓</span>
                       </div>
                     </div>
                   ))}
@@ -348,29 +370,55 @@ export default function Home() {
       )}
 
       {showPwdModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-            <div className="bg-slate-800 p-8 rounded-xl shadow-2xl w-96 transform scale-100 transition-transform duration-300 border border-slate-700">
-                <div className="flex justify-between items-center border-b border-slate-700 pb-3 mb-5">
-                    <h2 className="text-xl font-extrabold text-white">Security: Change Password</h2>
-                    <button onClick={() => setShowPwdModal(false)} className="text-slate-400 hover:text-white transition">
-                        <XMarkIcon className="w-6 h-6" />
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+            <div className="bg-slate-800 p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-md transform scale-100 transition-transform duration-300 border border-slate-700">
+                <div className="flex justify-between items-center border-b border-slate-700 pb-3 mb-4 sm:mb-5">
+                    <h2 className="text-lg sm:text-xl font-extrabold text-white">Change Password</h2>
+                    <button 
+                      onClick={() => setShowPwdModal(false)} 
+                      className="text-slate-400 hover:text-white transition active:scale-95"
+                    >
+                        <XMarkIcon className="w-5 h-5 sm:w-6 sm:h-6" />
                     </button>
                 </div>
                 <form onSubmit={handleChangePassword} className="space-y-4">
                     <div>
                         <label className="text-xs font-bold text-slate-400 uppercase block mb-1">Old Password</label>
-                        <input type="password" value={oldPwd} onChange={e=>setOldPwd(e.target.value)} className="w-full p-3 border border-slate-600 rounded-lg bg-slate-700 text-white focus:ring-2 focus:ring-cyan-400" required />
+                        <input 
+                          type="password" 
+                          value={oldPwd} 
+                          onChange={e=>setOldPwd(e.target.value)} 
+                          className="w-full p-3 border border-slate-600 rounded-lg bg-slate-700 text-white focus:ring-2 focus:ring-cyan-400 text-base" 
+                          required 
+                        />
                     </div>
                     <div>
                         <label className="text-xs font-bold text-slate-400 uppercase block mb-1">New Password</label>
-                        <input type="password" value={newPwd} onChange={e=>setNewPwd(e.target.value)} className="w-full p-3 border border-slate-600 rounded-lg bg-slate-700 text-white focus:ring-2 focus:ring-cyan-400" required />
+                        <input 
+                          type="password" 
+                          value={newPwd} 
+                          onChange={e=>setNewPwd(e.target.value)} 
+                          className="w-full p-3 border border-slate-600 rounded-lg bg-slate-700 text-white focus:ring-2 focus:ring-cyan-400 text-base" 
+                          required 
+                        />
                     </div>
                     
                     {pwdMsg && <p className={`text-sm font-bold text-center mt-3 ${pwdMsg.includes('Error') ? 'text-red-400 bg-red-900/50 p-2 rounded' : 'text-green-400 bg-green-900/50 p-2 rounded'}`}>{pwdMsg}</p>}
                     
                     <div className="flex gap-3 pt-4">
-                        <button type="button" onClick={()=>{setShowPwdModal(false); setPwdMsg('');}} className="flex-1 bg-slate-700 py-3 rounded-lg font-bold text-slate-300 hover:bg-slate-600 transition">Cancel</button>
-                        <button type="submit" className="flex-1 bg-cyan-600 py-3 rounded-lg font-bold text-white hover:bg-cyan-700 transition">Update Password</button>
+                        <button 
+                          type="button" 
+                          onClick={()=>{setShowPwdModal(false); setPwdMsg('');}} 
+                          className="flex-1 bg-slate-700 py-3 rounded-lg font-bold text-slate-300 hover:bg-slate-600 transition active:scale-95"
+                        >
+                          Cancel
+                        </button>
+                        <button 
+                          type="submit" 
+                          className="flex-1 bg-cyan-600 py-3 rounded-lg font-bold text-white hover:bg-cyan-700 transition active:scale-95"
+                        >
+                          Update
+                        </button>
                     </div>
                 </form>
             </div>
