@@ -321,7 +321,7 @@ export default function AdminDashboard() {
   const TABS: ViewMode[] = ["manage", "payroll", "audit", "settings"];
 
   return (
-    <div className="min-h-screen bg-slate-900 p-8 font-sans text-gray-100">
+<div className="h-full w-full overflow-y-auto bg-slate-900 text-slate-100 p-6 font-sans overscroll-none">
       <div className="max-w-7xl mx-auto">
         
         <div className="flex justify-between items-center mb-10 border-b border-slate-700 pb-4">
