@@ -223,7 +223,7 @@ export default function Home() {
   if (loading && view === 'login') return <div className="p-10 text-center font-mono text-slate-400 bg-slate-900 min-h-screen">Initializing Secure Environment...</div>;
 
   return (
-<div className="h-full w-full overflow-y-auto bg-slate-900 flex items-center justify-center p-4 relative">      
+<div className="h-full w-full overflow-y-auto bg-slate-900 flex items-center justify-center p-4 relative overscroll-none">
       {view === 'dashboard' && (
          <div className="absolute top-4 right-4 flex items-center gap-3">
              <button 
