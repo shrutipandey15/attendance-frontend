@@ -1,21 +1,43 @@
 {
-  "name": "Attendance Guardian",
+  "name": "Attendance Guardian - Employee Attendance System",
   "short_name": "Attendance",
+  "description": "Secure biometric attendance tracking system with device binding and GPS verification",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#0891b2",
-  "orientation": "portrait",
+  "orientation": "portrait-primary",
+  "categories": ["business", "productivity"],
   "icons": [
     {
       "src": "/window.svg",
       "sizes": "192x192",
-      "type": "image/svg+xml"
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
     },
     {
       "src": "/window.svg",
       "sizes": "512x512",
-      "type": "image/svg+xml"
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
     }
-  ]
+  ],
+  "shortcuts": [
+    {
+      "name": "Check In",
+      "short_name": "Check In",
+      "description": "Quick check-in to work",
+      "url": "/?action=check-in",
+      "icons": []
+    },
+    {
+      "name": "Admin Panel",
+      "short_name": "Admin",
+      "description": "Access admin dashboard",
+      "url": "/admin",
+      "icons": []
+    }
+  ],
+  "screenshots": [],
+  "prefer_related_applications": false
 }

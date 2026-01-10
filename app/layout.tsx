@@ -13,9 +13,21 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Attendance Guardian",
-  description: "Secure Employee Attendance System",
+  title: "Attendance Guardian - Secure Attendance System",
+  description: "Biometric attendance tracking with device binding, GPS verification, and cryptographic signatures",
   manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Attendance Guardian"
+  },
+  applicationName: "Attendance Guardian",
+  keywords: ["attendance", "biometric", "employee", "tracking", "secure", "GPS", "device binding"],
+  authors: [{ name: "Attendance Guardian Team" }],
+  icons: {
+    icon: "/window.svg",
+    apple: "/window.svg"
+  }
 };
 
 export const viewport: Viewport = {
@@ -33,10 +45,32 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <link rel="apple-touch-icon" href="/window.svg" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="mobile-web-app-capable" content="yes" />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
         {children}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              if ('serviceWorker' in navigator) {
+                window.addEventListener('load', () => {
+                  navigator.serviceWorker.register('/sw.js')
+                    .then((registration) => {
+                      console.log('SW registered:', registration.scope);
+                    })
+                    .catch((error) => {
+                      console.log('SW registration failed:', error);
+                    });
+                });
+              }
+            `,
+          }}
+        />
       </body>
     </html>
   );

@@ -1,772 +1,965 @@
-"use client";
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import { databases, functions, account } from "../../lib/appwrite";
-import { Query, Models, ID } from "appwrite";
-import { 
-    ShieldCheckIcon, UserPlusIcon, XCircleIcon, CalendarDaysIcon, CurrencyRupeeIcon, ClipboardDocumentListIcon, ShieldExclamationIcon, ArrowLeftOnRectangleIcon, MagnifyingGlassIcon, PlusCircleIcon, TrashIcon, Cog6ToothIcon
-} from '@heroicons/react/24/outline'; 
+'use client';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import {
+  getCurrentUser,
+  logout as apiLogout,
+  changePassword as apiChangePassword,
+  createEmployee,
+  getPayrollReport,
+  generatePayroll,
+  unlockPayroll,
+  createHoliday,
+  deleteHoliday,
+  getHolidays,
+  getAuditLogs,
+  modifyAttendance,
+  resetEmployeeDevice
+} from '../../lib/api';
+import type { User, PayrollRecord, Holiday, AuditLog } from '../../lib/api';
+import {
+  ShieldCheckIcon, UserPlusIcon, CalendarDaysIcon, CurrencyRupeeIcon,
+  ClipboardDocumentListIcon, Cog6ToothIcon, PlusCircleIcon, TrashIcon,
+  MagnifyingGlassIcon, LockOpenIcon, LockClosedIcon, 
+  PencilSquareIcon, DevicePhoneMobileIcon // <--- ADDED ICONS
+} from '@heroicons/react/24/outline';
 
-import { 
-    DB_ID, 
-    FUNCTION_ID, 
-    EMPLOYEE_COLLECTION, 
-    AUDIT_COLLECTION,
-    HOLIDAY_COLLECTION,
-    LEAVE_COLLECTION 
-} from '../../lib/constants'; 
-import { formatTimestamp } from '../../lib/utils'; 
-import { addManualLog, deleteLog } from '../../lib/adminService';
-
-interface AuditLogDocument extends Models.Document {
-  timestamp: string;
-  actorId: string;
-  action: string;
-  payload: string;
-}
-interface HolidayDocument extends Models.Document {
-  date: string;
-  name: string;
-}
-interface LeaveDocument extends Models.Document {
-  employeeId: string;
-  date: string;
-  type: string;
-  status: string;
-}
-interface EmployeeProfile extends Models.Document {
-  name: string;
-  email: string;
-  salaryMonthly: number;
-  deviceFingerprint?: string;
-  joinDate: string;
-}
-
-type DailyStatus =
-  | "Present"
-  | "Absent"
-  | "Half-Day"
-  | "Weekend"
-  | "Holiday"
-  | "Leave"
-  | "Pre-Employment";
-
-interface DailyRecord {
-  date: string;
-  day: string;
-  status: DailyStatus;
-  inT: string;
-  outT: string;
-  dur: number;
-  ot: number;
-  notes: string;
-}
-
-interface PayrollReport {
-  employeeId: string;
-  employeeName: string;
-  month: string;
-  netSalary: string;
-  presentDays: number;
-  absentDays: number;
-  holidayDays: number;
-  paidLeaveDays: number;
-  halfDays: number;
-  dailyBreakdown: DailyRecord[];
-}
-
-interface ParsedLog extends AuditLogDocument {
-  employeeName: string;
-  device: string;
-}
-
-type ViewMode = "audit" | "payroll" | "manage" | "settings";
+type ViewMode = 'manage' | 'payroll' | 'audit' | 'settings';
 
 export default function AdminDashboard() {
   const router = useRouter();
-  const [viewMode, setViewMode] = useState<ViewMode>("manage");
-  const [reports, setReports] = useState<PayrollReport[]>([]);
-  
-  const [employees, setEmployees] = useState<EmployeeProfile[]>([]);
-  const [empPage, setEmpPage] = useState(1);
-  const [empTotal, setEmpTotal] = useState(0);
-  const EMP_LIMIT = 20;
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<ViewMode>('manage');
 
-  const [holidays, setHolidays] = useState<HolidayDocument[]>([]);
+  // Manage Tab State
+  const [newEmpName, setNewEmpName] = useState('');
+  const [newEmpEmail, setNewEmpEmail] = useState('');
+  const [newEmpPassword, setNewEmpPassword] = useState('');
+  const [newEmpSalary, setNewEmpSalary] = useState('8000');
+  const [newEmpJoinDate, setNewEmpJoinDate] = useState('');
+  const [isCreatingEmp, setIsCreatingEmp] = useState(false);
 
-  const [logs, setLogs] = useState<ParsedLog[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [newHolidayDate, setNewHolidayDate] = useState('');
+  const [newHolidayName, setNewHolidayName] = useState('');
+  const [newHolidayDesc, setNewHolidayDesc] = useState('');
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
 
-  const [auditFilter, setAuditFilter] = useState('');
-  const [auditPage, setAuditPage] = useState(1);
+  // Payroll Tab State
+  const [selectedMonth, setSelectedMonth] = useState('');
+  const [payrollReports, setPayrollReports] = useState<PayrollRecord[]>([]);
+  const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
+  const [isGeneratingPayroll, setIsGeneratingPayroll] = useState(false);
+  const [isUnlockingPayroll, setIsUnlockingPayroll] = useState(false);
+  const [unlockReason, setUnlockReason] = useState('');
+
+  // Attendance Editing State (ADDED)
+  const [editingAttendance, setEditingAttendance] = useState<any>(null);
+  const [editCheckIn, setEditCheckIn] = useState('');
+  const [editCheckOut, setEditCheckOut] = useState('');
+  const [editReason, setEditReason] = useState('');
+
+  // Audit Tab State
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [auditTotal, setAuditTotal] = useState(0);
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditFilter, setAuditFilter] = useState('');
   const AUDIT_LIMIT = 20;
 
-  const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
+  // Settings Tab State
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [passwordMsg, setPasswordMsg] = useState('');
 
-  const [newHolidayDate, setNewHolidayDate] = useState("");
-  const [newHolidayName, setNewHolidayName] = useState("");
-  const [leaveEmpId, setLeaveEmpId] = useState("");
-  const [leaveDate, setLeaveDate] = useState("");
-  const [leaveType, setLeaveType] = useState("Sick");
+  useEffect(() => {
+    checkAdminSession();
+  }, []);
 
-  const [newEmpName, setNewEmpName] = useState("");
-  const [newEmpEmail, setNewEmpEmail] = useState("");
-  const [newEmpPass, setNewEmpPass] = useState("");
-  const [newEmpSalary, setNewEmpSalary] = useState("");
-  const [isCreating, setIsCreating] = useState(false);
+  useEffect(() => {
+    if (viewMode === 'manage') {
+      fetchHolidays();
+    } else if (viewMode === 'payroll') {
+      // Set default month to current
+      const now = new Date();
+      const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      setSelectedMonth(currentMonth);
+    } else if (viewMode === 'audit') {
+      fetchAuditLogs(1);
+    }
+  }, [viewMode]);
 
-  const [manualEmpId, setManualEmpId] = useState("");
-  const [manualDate, setManualDate] = useState("");
-  const [manualAction, setManualAction] = useState<"check-in" | "check-out">("check-in");
-  const [isManualSubmitting, setIsManualSubmitting] = useState(false);
-
-  const [oldPass, setOldPass] = useState("");
-  const [newPass, setNewPass] = useState("");
-  const [isUpdatingAuth, setIsUpdatingAuth] = useState(false);
-
-  const selectedReport = reports.find(r => r.employeeId === selectedReportId);
-
-  const fetchEmployees = async (page: number) => {
+  const checkAdminSession = async () => {
     try {
-      const offset = (page - 1) * EMP_LIMIT;
-      const empRes = await databases.listDocuments<EmployeeProfile>(
-        DB_ID, 
-        EMPLOYEE_COLLECTION,
-        [
-          Query.limit(EMP_LIMIT),
-          Query.offset(offset),
-          Query.orderAsc("name"),
-        ]
-      );
-      setEmployees(empRes.documents);
-      setEmpTotal(empRes.total);
-      setEmpPage(page);
+      const activeUser = await getCurrentUser();
+
+      if (!activeUser) {
+        router.push('/');
+        return;
+      }
+
+      setUser(activeUser);
     } catch (error) {
-      console.error("Failed to fetch employee list", error);
+      console.error('Admin session check failed:', error);
+      router.push('/');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const fetchAuditLogs = async (page: number, filterTerm: string = auditFilter) => {
+  // ============================================
+  // MANAGE TAB FUNCTIONS
+  // ============================================
+
+  const handleCreateEmployee = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsCreatingEmp(true);
+
     try {
-      const offset = (page - 1) * AUDIT_LIMIT;
-      const queries = [
-          Query.limit(AUDIT_LIMIT),
-          Query.offset(offset),
-          Query.orderDesc("timestamp"),
-      ];
-      if (filterTerm) {
-          queries.push(Query.search('payload', filterTerm)); 
+      const result = await createEmployee({
+        email: newEmpEmail,
+        password: newEmpPassword,
+        name: newEmpName,
+        salary: parseFloat(newEmpSalary),
+        joinDate: newEmpJoinDate
+      });
+
+      if (result.success) {
+        alert(`✅ ${result.message}`);
+        setNewEmpName('');
+        setNewEmpEmail('');
+        setNewEmpPassword('');
+        setNewEmpSalary('8000');
+        setNewEmpJoinDate('');
+      } else {
+        alert(`❌ ${result.message}`);
       }
-      const res = await databases.listDocuments<AuditLogDocument>(DB_ID, AUDIT_COLLECTION, queries);
-      const parsed: ParsedLog[] = await Promise.all(
-        res.documents.map(async (log) => {
-          let payload: { employeeName?: string; device?: string } = {};
-          try { payload = JSON.parse(log.payload); } catch {}
-          const employeeName = payload?.employeeName || "Unknown";
-          const device = payload?.device || "-";
-          return { ...log, employeeName, device };
-        })
-      );
-      setLogs(parsed);
-      setAuditTotal(res.total);
-      setAuditPage(page);
-    } catch (error) {
-      console.error("Failed to fetch logs", error);
+    } catch (error: any) {
+      alert(`Error: ${error.message}`);
+    } finally {
+      setIsCreatingEmp(false);
     }
   };
 
   const fetchHolidays = async () => {
     try {
-      const res = await databases.listDocuments<HolidayDocument>(
-        DB_ID,
-        HOLIDAY_COLLECTION,
-        [Query.limit(100), Query.orderAsc("date")]
-      );
-      setHolidays(res.documents);
-    } catch (error) {
-      console.error("Failed to fetch holidays", error);
-    }
-  };
-
-  useEffect(() => {
-    const init = async () => {
-      try {
-        await account.get();
-      } catch {
-        router.replace("/admin-login");
-        return;
+      const result = await getHolidays();
+      if (result.success && result.data) {
+        setHolidays(result.data.holidays);
       }
-      await fetchEmployees(1);
-      await fetchAuditLogs(1);
-      await fetchHolidays();
-      setIsLoading(false);
-    };
-    init();
-  }, [router]);
-
-  useEffect(() => { 
-    const load = async () => await fetchAuditLogs(auditPage);
-    load();
-  }, [auditPage]);
-  
-  useEffect(() => { 
-    const load = async () => await fetchEmployees(empPage);
-    load();
-  }, [empPage]);
-
-  const handleDeleteHoliday = async (id: string) => {
-    try {
-      await databases.deleteDocument(DB_ID, HOLIDAY_COLLECTION, id);
-      await fetchHolidays();
     } catch (error) {
-      alert("Failed to delete holiday");
+      console.error('Failed to fetch holidays:', error);
     }
   };
 
   const handleAddHoliday = async (e: React.FormEvent) => {
     e.preventDefault();
-    try {
-      await databases.createDocument(DB_ID, HOLIDAY_COLLECTION, ID.unique(), {
-        date: newHolidayDate,
-        name: newHolidayName,
-      });
-      await fetchHolidays();
-      setNewHolidayDate("");
-      setNewHolidayName("");
-    } catch (error) {
-      alert("Failed to add holiday");
-    }
-  };
 
-  const handleApproveLeave = async (empId: string, date: string) => {
     try {
-      await databases.createDocument(DB_ID, LEAVE_COLLECTION, ID.unique(), {
-        employeeId: empId,
-        date,
-        type: leaveType,
-        status: "Approved",
-      });
-      alert("Leave approved");
-      setLeaveEmpId("");
-      setLeaveDate("");
-    } catch (error) {
-      alert("Failed to approve leave");
-    }
-  };
+      const result = await createHoliday(newHolidayDate, newHolidayName, newHolidayDesc);
 
-  const handleCreateEmployee = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsCreating(true);
-    try {
-      const execution = await functions.createExecution(FUNCTION_ID, JSON.stringify({
-        action: "create_employee",
-        data: {
-          name: newEmpName,
-          email: newEmpEmail,
-          password: newEmpPass,
-          salary: Number(newEmpSalary),
-        }
-      }));
-      
-      const response = JSON.parse(execution.responseBody);
-      
-      if (response.success) {
-        alert("Employee created successfully");
-        await fetchEmployees(1);
-        // Clear form only on success
-        setNewEmpName("");
-        setNewEmpEmail("");
-        setNewEmpPass("");
-        setNewEmpSalary("");
+      if (result.success) {
+        alert(`✅ ${result.message}`);
+        setNewHolidayDate('');
+        setNewHolidayName('');
+        setNewHolidayDesc('');
+        await fetchHolidays();
       } else {
-        alert(`Failed: ${response.message || "Unknown error"}`);
+        alert(`❌ ${result.message}`);
       }
-    } catch (error) {
-      alert("Failed to create employee");
+    } catch (error: any) {
+      alert(`Error: ${error.message}`);
     }
-    setIsCreating(false);
   };
 
-  const handleGenerateReport = async () => {
+  const handleDeleteHoliday = async (holidayId: string, holidayName: string) => {
+    if (!confirm(`Delete holiday: ${holidayName}?`)) return;
+
     try {
-      const resp = await functions.createExecution(
-        FUNCTION_ID,
-        JSON.stringify({ action: "get_payroll_report" })
-      );
-      const output = JSON.parse(resp.responseBody);
-      setReports(output.reports);
-    } catch (error) {
-      alert("Failed to generate report");
+      const result = await deleteHoliday(holidayId);
+
+      if (result.success) {
+        alert(`✅ ${result.message}`);
+        await fetchHolidays();
+      } else {
+        alert(`❌ ${result.message}`);
+      }
+    } catch (error: any) {
+      alert(`Error: ${error.message}`);
     }
   };
 
-  const handleManualEntry = async () => {
-    if (!manualEmpId || !manualDate) {
-      alert("Fill all fields");
+  // ============================================
+  // PAYROLL TAB FUNCTIONS
+  // ============================================
+
+  const handleGeneratePayroll = async () => {
+    if (!selectedMonth) {
+      alert('Please select a month');
       return;
     }
-    setIsManualSubmitting(true);
-    try {
-      await addManualLog(manualEmpId, manualAction, new Date(manualDate));
-      await fetchAuditLogs(auditPage);
-      setManualEmpId("");
-      setManualDate("");
-      alert("Manual entry added");
-    } catch (error) {
-      alert("Failed to add entry");
-    }
-    setIsManualSubmitting(false);
-  };
 
-  const handleDeleteLog = async (logId: string) => {
-    if (!confirm("Delete this log?")) return;
+    if (!confirm(`Generate payroll for ${selectedMonth}?`)) return;
+
+    setIsGeneratingPayroll(true);
+
     try {
-      await deleteLog(logId);
-      await fetchAuditLogs(auditPage);
-    } catch (error) {
-      alert("Failed to delete log");
+      const result = await generatePayroll(selectedMonth);
+
+      if (result.success) {
+        alert(`✅ ${result.message}`);
+        await fetchPayrollReport();
+      } else {
+        alert(`❌ ${result.message}`);
+      }
+    } catch (error: any) {
+      alert(`Error: ${error.message}`);
+    } finally {
+      setIsGeneratingPayroll(false);
     }
   };
 
-  const handleUpdatePassword = async (e: React.FormEvent) => {
+  const handleUnlockPayroll = async () => {
+    if (!selectedMonth) {
+      alert('Please select a month');
+      return;
+    }
+
+    if (!unlockReason.trim()) {
+      alert('Please provide a reason for unlocking payroll');
+      return;
+    }
+
+    if (!confirm(`Unlock payroll for ${selectedMonth}?`)) return;
+
+    setIsUnlockingPayroll(true);
+
+    try {
+      const result = await unlockPayroll(selectedMonth, unlockReason);
+
+      if (result.success) {
+        alert(`✅ ${result.message}`);
+        setUnlockReason('');
+        await fetchPayrollReport();
+      } else {
+        alert(`❌ ${result.message}`);
+      }
+    } catch (error: any) {
+      alert(`Error: ${error.message}`);
+    } finally {
+      setIsUnlockingPayroll(false);
+    }
+  };
+
+  const fetchPayrollReport = async () => {
+    if (!selectedMonth) return;
+
+    try {
+      const result = await getPayrollReport(selectedMonth);
+
+      if (result.success && result.data) {
+        setPayrollReports(result.data.reports);
+      }
+    } catch (error) {
+      console.error('Failed to fetch payroll:', error);
+    }
+  };
+
+  // --- NEW: Handle Device Reset ---
+  const handleResetDevice = async (employeeId: string, employeeName: string) => {
+    // Prevent bubbling if clicked inside accordion header
+    if (!confirm(`Reset device binding for ${employeeName}? They will need to re-register their device.`)) return;
+    
+    const reason = prompt("Enter reason for reset (required):");
+    if (!reason) return;
+
+    try {
+      const result = await resetEmployeeDevice(employeeId, reason);
+      if (result.success) {
+        alert('✅ Device reset successfully. Employee can now re-register.');
+      } else {
+        alert(`❌ ${result.message}`);
+      }
+    } catch (error: any) {
+      alert(`Error: ${error.message}`);
+    }
+  };
+
+  // --- NEW: Open Edit Modal ---
+  const openEditModal = (day: any) => {
+    if (!day.id) {
+        alert("Cannot edit this record (ID missing). Please regenerate payroll.");
+        return;
+    }
+    setEditingAttendance(day);
+    // Reset inputs
+    setEditCheckIn(''); 
+    setEditCheckOut('');
+    setEditReason('');
+  };
+
+  // --- NEW: Submit Attendance Edit ---
+  const handleSubmitEdit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsUpdatingAuth(true);
-    try {
-      await account.updatePassword(newPass, oldPass);
-      alert("Password updated successfully");
-      setOldPass("");
-      setNewPass("");
-    } catch (error) {
-      alert("Failed to update password");
+    if (!editingAttendance || !editReason) {
+        alert("Reason is required");
+        return;
     }
-    setIsUpdatingAuth(false);
+
+    try {
+      const modifications: any = {};
+      
+      // If user entered time, assume it is for the record's date
+      // NOTE: This assumes Local Time input. We append :00Z or convert as needed.
+      // For simplicity in this demo, we assume the user inputs HH:MM and we append it to the date YYYY-MM-DD
+      
+      if (editCheckIn) {
+        // Construct ISO string: "2024-01-20T09:00:00.000Z" (Assuming UTC/Server time expectation)
+        // Or better, let the backend handle the date part if you send just time.
+        // But your backend expects ISO strings. 
+        // Let's attach the time to the date.
+        modifications.checkInTime = `${editingAttendance.date}T${editCheckIn}:00.000Z`;
+      }
+      
+      if (editCheckOut) {
+        modifications.checkOutTime = `${editingAttendance.date}T${editCheckOut}:00.000Z`;
+      }
+
+      // Allow status change directly if needed, or let backend recalc based on time
+      // modifications.status = 'present'; // Optional: Add a dropdown for status if you want manual override
+
+      const result = await modifyAttendance(editingAttendance.id, editReason, modifications);
+      
+      if (result.success) {
+        alert('✅ Attendance updated!');
+        setEditingAttendance(null);
+        fetchPayrollReport(); // Refresh data to show changes
+      } else {
+        alert(`❌ ${result.message}`);
+      }
+    } catch (error: any) {
+      alert(`Error: ${error.message}`);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedMonth && viewMode === 'payroll') {
+      fetchPayrollReport();
+    }
+  }, [selectedMonth]);
+
+  // ============================================
+  // AUDIT TAB FUNCTIONS
+  // ============================================
+
+  const fetchAuditLogs = async (page: number, filter?: string) => {
+    try {
+      const offset = (page - 1) * AUDIT_LIMIT;
+      const filters: any = {};
+
+      if (filter) {
+        filters.action = filter;
+      }
+
+      const result = await getAuditLogs(filters, AUDIT_LIMIT, offset);
+
+      if (result.success && result.data) {
+        setAuditLogs(result.data.logs);
+        setAuditTotal(result.data.total);
+        setAuditPage(page);
+      }
+    } catch (error) {
+      console.error('Failed to fetch audit logs:', error);
+    }
+  };
+
+  const handleAuditFilterChange = (filter: string) => {
+    setAuditFilter(filter);
+    fetchAuditLogs(1, filter);
+  };
+
+  // ============================================
+  // SETTINGS TAB FUNCTIONS
+  // ============================================
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordMsg('Updating...');
+
+    try {
+      const result = await apiChangePassword(oldPassword, newPassword);
+
+      if (result.success) {
+        setPasswordMsg('✅ Password changed successfully!');
+        setOldPassword('');
+        setNewPassword('');
+
+        setTimeout(() => {
+          setPasswordMsg('');
+        }, 3000);
+      } else {
+        setPasswordMsg(`❌ ${result.message}`);
+      }
+    } catch (error: any) {
+      setPasswordMsg(`❌ Error: ${error.message}`);
+    }
   };
 
   const handleLogout = async () => {
-    try {
-      await account.deleteSession("current");
-      router.replace("/admin-login");
-    } catch {}
+    await apiLogout();
+    router.push('/');
   };
 
-  if (isLoading) {
+  // ============================================
+  // UTILITY FUNCTIONS
+  // ============================================
+
+  const formatDateTime = (isoString: string) => {
+    const date = new Date(isoString);
+    return date.toLocaleString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      dateStyle: 'medium',
+      timeStyle: 'short'
+    });
+  };
+
+  if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 to-slate-800">
-        <div className="text-center">
-          <ShieldCheckIcon className="w-16 h-16 sm:w-20 sm:h-20 text-cyan-500 mx-auto mb-4 animate-pulse" />
-          <p className="text-xl sm:text-2xl font-bold text-slate-300">Loading...</p>
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <div className="w-16 h-16 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+          <p className="text-slate-400 font-mono">Loading Admin Panel...</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800">
-      <div className="sticky top-0 z-50 bg-slate-900/95 backdrop-blur-sm border-b border-slate-700 shadow-lg">
-        <div className="px-3 sm:px-6 py-3 sm:py-4">
-          <div className="flex items-center justify-between mb-3 sm:mb-4">
-            <h1 className="text-lg sm:text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500 flex items-center gap-2">
-              <ShieldCheckIcon className="w-6 h-6 sm:w-8 sm:h-8 text-cyan-500" />
-              <span className="hidden sm:inline">Guardian Admin</span>
-              <span className="sm:hidden">Admin</span>
-            </h1>
-          </div>
-          
-          {/* Mobile-optimized navigation - horizontal scroll on small screens */}
-          <div className="overflow-x-auto -mx-3 px-3 sm:mx-0 sm:px-0 scrollbar-hide">
-            <div className="flex gap-2 min-w-max sm:min-w-0">
-              <button onClick={() => setViewMode("manage")} className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg font-semibold text-xs sm:text-sm transition-all whitespace-nowrap ${viewMode === "manage" ? "bg-cyan-600 text-white shadow-lg" : "bg-slate-800 text-slate-300 hover:bg-slate-700"}`}>
-                <UserPlusIcon className="w-4 h-4 sm:w-5 sm:h-5" />
-                <span>Manage</span>
-              </button>
-              <button onClick={() => setViewMode("payroll")} className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg font-semibold text-xs sm:text-sm transition-all whitespace-nowrap ${viewMode === "payroll" ? "bg-cyan-600 text-white shadow-lg" : "bg-slate-800 text-slate-300 hover:bg-slate-700"}`}>
-                <CurrencyRupeeIcon className="w-4 h-4 sm:w-5 sm:h-5" />
-                <span>Payroll</span>
-              </button>
-              <button onClick={() => setViewMode("audit")} className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg font-semibold text-xs sm:text-sm transition-all whitespace-nowrap ${viewMode === "audit" ? "bg-cyan-600 text-white shadow-lg" : "bg-slate-800 text-slate-300 hover:bg-slate-700"}`}>
-                <ClipboardDocumentListIcon className="w-4 h-4 sm:w-5 sm:h-5" />
-                <span>Audit</span>
-              </button>
-              <button onClick={() => setViewMode("settings")} className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 sm:py-2.5 rounded-lg font-semibold text-xs sm:text-sm transition-all whitespace-nowrap ${viewMode === "settings" ? "bg-cyan-600 text-white shadow-lg" : "bg-slate-800 text-slate-300 hover:bg-slate-700"}`}>
-                <Cog6ToothIcon className="w-4 h-4 sm:w-5 sm:h-5" />
-                <span>Settings</span>
-              </button>
+    <div className="min-h-screen bg-slate-900 text-white relative">
+      {/* Header */}
+      <div className="bg-slate-800 border-b border-slate-700 px-4 py-4 sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <ShieldCheckIcon className="w-8 h-8 text-cyan-400" />
+            <div>
+              <h1 className="text-xl font-bold">Admin Dashboard</h1>
+              <p className="text-xs text-slate-400">{user?.name}</p>
             </div>
           </div>
+          <button
+            onClick={handleLogout}
+            className="text-sm font-bold text-red-400 hover:text-red-500 underline decoration-2"
+          >
+            Logout
+          </button>
         </div>
       </div>
 
-      <div className="px-3 sm:px-6 py-4 sm:py-6 pb-safe">
-        {!isLoading && viewMode === "manage" && (
-          <div className="space-y-4 sm:space-y-6">
-            <div className="bg-slate-800 rounded-lg sm:rounded-xl shadow-lg border border-slate-700 overflow-hidden">
-              <h2 className="font-bold text-base sm:text-xl p-3 sm:p-4 text-cyan-400 flex items-center gap-2 border-b border-slate-700">
-                <UserPlusIcon className="w-4 h-4 sm:w-5 sm:h-5" />
-                Create Employee
+      {/* Tab Navigation */}
+      <div className="bg-slate-800 border-b border-slate-700 px-4">
+        <div className="max-w-7xl mx-auto flex gap-1 overflow-x-auto">
+          {[
+            { id: 'manage' as ViewMode, icon: UserPlusIcon, label: 'Manage' },
+            { id: 'payroll' as ViewMode, icon: CurrencyRupeeIcon, label: 'Payroll' },
+            { id: 'audit' as ViewMode, icon: ClipboardDocumentListIcon, label: 'Audit' },
+            { id: 'settings' as ViewMode, icon: Cog6ToothIcon, label: 'Settings' }
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setViewMode(tab.id)}
+              className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 transition whitespace-nowrap ${
+                viewMode === tab.id
+                  ? 'border-cyan-400 text-cyan-400'
+                  : 'border-transparent text-slate-400 hover:text-slate-300'
+              }`}
+            >
+              <tab.icon className="w-5 h-5" />
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="max-w-7xl mx-auto p-4">
+        {/* MANAGE TAB */}
+        {viewMode === 'manage' && (
+          <div className="space-y-6">
+            {/* Create Employee */}
+            <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
+              <h2 className="text-lg font-bold text-cyan-400 mb-4 flex items-center gap-2">
+                <UserPlusIcon className="w-6 h-6" />
+                Create New Employee
               </h2>
-              <form onSubmit={handleCreateEmployee} className="p-3 sm:p-6" autoComplete="off">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                  <input required placeholder="Full Name" autoComplete="off" className="p-2.5 sm:p-3 rounded bg-slate-700 text-white border border-slate-600 text-sm focus:ring-1 focus:ring-cyan-500 outline-none" value={newEmpName} onChange={(e) => setNewEmpName(e.target.value)} />
-                  <input required type="email" placeholder="Email" autoComplete="off" className="p-2.5 sm:p-3 rounded bg-slate-700 text-white border border-slate-600 text-sm focus:ring-1 focus:ring-cyan-500 outline-none" value={newEmpEmail} onChange={(e) => setNewEmpEmail(e.target.value)} />
-                  <input required type="password" minLength={8} placeholder="Password" autoComplete="new-password" className="p-2.5 sm:p-3 rounded bg-slate-700 text-white border border-slate-600 text-sm focus:ring-1 focus:ring-cyan-500 outline-none" value={newEmpPass} onChange={(e) => setNewEmpPass(e.target.value)} />
-                  <input required type="number" placeholder="Monthly Salary (₹)" autoComplete="off" className="p-2.5 sm:p-3 rounded bg-slate-700 text-white border border-slate-600 text-sm focus:ring-1 focus:ring-cyan-500 outline-none" value={newEmpSalary} onChange={(e) => setNewEmpSalary(e.target.value)} />
-                </div>
-                <button disabled={isCreating} className="mt-3 sm:mt-4 w-full bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2.5 sm:py-3 rounded-lg font-bold text-sm transition shadow-lg disabled:opacity-50 active:scale-95">
-                  {isCreating ? "Creating..." : "Create Employee"}
-                </button>
-              </form>
-            </div>
-
-            <div className="bg-slate-800 rounded-lg sm:rounded-xl shadow-lg border border-slate-700 overflow-hidden">
-              <h2 className="font-bold text-base sm:text-xl p-3 sm:p-4 text-cyan-400 flex items-center gap-2 border-b border-slate-700">
-                <CalendarDaysIcon className="w-4 h-4 sm:w-5 sm:h-5" />
-                Holidays
-              </h2>
-              <form onSubmit={handleAddHoliday} className="p-3 sm:p-4 bg-slate-900/50 border-b border-slate-700">
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input required type="date" className="flex-1 p-2.5 sm:p-3 rounded bg-slate-700 text-white border border-slate-600 text-sm" value={newHolidayDate} onChange={(e) => setNewHolidayDate(e.target.value)} />
-                  <input required placeholder="Holiday Name" className="flex-1 p-2.5 sm:p-3 rounded bg-slate-700 text-white border border-slate-600 text-sm" value={newHolidayName} onChange={(e) => setNewHolidayName(e.target.value)} />
-                  <button className="bg-green-600 hover:bg-green-700 text-white px-4 py-2.5 sm:py-3 rounded font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition">
-                    <PlusCircleIcon className="w-4 h-4" /> Add
-                  </button>
-                </div>
-              </form>
-              <div className="divide-y divide-slate-700 max-h-64 sm:max-h-80 overflow-y-auto">
-                {holidays.map((h) => (
-                  <div key={h.$id} className="p-3 sm:p-4 flex items-center justify-between hover:bg-slate-700/50 transition">
-                    <div>
-                      <p className="font-semibold text-white text-sm">{h.name}</p>
-                      <p className="text-xs text-slate-400 font-mono">{h.date}</p>
-                    </div>
-                    <button onClick={() => handleDeleteHoliday(h.$id)} className="text-red-400 hover:text-red-300 p-2 rounded-full hover:bg-red-900/30 transition active:scale-95" title="Delete">
-                      <TrashIcon className="w-4 h-4 sm:w-5 sm:h-5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-slate-800 rounded-lg sm:rounded-xl shadow-lg border border-slate-700 overflow-hidden">
-              <h2 className="font-bold text-base sm:text-xl p-3 sm:p-4 text-cyan-400 flex items-center gap-2 border-b border-slate-700">
-                <ShieldExclamationIcon className="w-4 h-4 sm:w-5 sm:h-5" />
-                Approve Leave
-              </h2>
-              <div className="p-3 sm:p-6">
-                <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-                  <select className="flex-1 p-2.5 sm:p-3 rounded bg-slate-700 text-white border border-slate-600 text-sm" value={leaveEmpId} onChange={(e) => setLeaveEmpId(e.target.value)}>
-                    <option value="">Select Employee</option>
-                    {employees.map((e) => <option key={e.$id} value={e.$id}>{e.name}</option>)}
-                  </select>
-                  <select className="flex-1 p-2.5 sm:p-3 rounded bg-slate-700 text-white border border-slate-600 text-sm" value={leaveType} onChange={(e) => setLeaveType(e.target.value)}>
-                    <option value="Sick">Sick</option>
-                    <option value="Casual">Casual</option>
-                  </select>
-                  <input type="date" className="flex-1 p-2.5 sm:p-3 rounded bg-slate-700 text-white border border-slate-600 text-sm" value={leaveDate} onChange={(e) => setLeaveDate(e.target.value)} />
-                  <button onClick={() => handleApproveLeave(leaveEmpId, leaveDate)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 sm:py-3 rounded font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition">
-                    <ShieldExclamationIcon className="w-4 h-4" /> Approve
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-slate-800 rounded-lg sm:rounded-xl shadow-lg border border-slate-700 overflow-hidden">
-              <h2 className="font-bold text-base sm:text-xl p-3 sm:p-4 text-cyan-400 flex items-center gap-2 border-b border-slate-700">
-                <UserPlusIcon className="w-4 h-4 sm:w-5 sm:h-5" />
-                All Employees
-              </h2>
-              
-              <div className="flex justify-between items-center p-3 sm:p-4 bg-slate-900 border-b border-slate-700 text-xs sm:text-sm">
-                <p className="text-slate-400 font-medium">Page {empPage} of {Math.ceil(empTotal / EMP_LIMIT)}</p>
-                <div className="flex gap-2">
-                  <button onClick={() => setEmpPage(empPage - 1)} disabled={empPage === 1} className="px-3 py-1.5 bg-slate-700 text-slate-300 rounded text-xs hover:bg-slate-600 disabled:opacity-30 active:scale-95 transition">Prev</button>
-                  <button onClick={() => setEmpPage(empPage + 1)} disabled={empPage * EMP_LIMIT >= empTotal} className="px-3 py-1.5 bg-slate-700 text-slate-300 rounded text-xs hover:bg-slate-600 disabled:opacity-30 active:scale-95 transition">Next</button>
-                </div>
-              </div>
-
-              <div className="block sm:hidden divide-y divide-slate-700 max-h-96 overflow-y-auto">
-                {employees.map((emp) => (
-                  <div key={emp.$id} className="p-3 hover:bg-slate-700/50 transition">
-                    <p className="font-semibold text-white text-sm mb-1">{emp.name}</p>
-                    <p className="text-xs text-slate-400 mb-2">{emp.email}</p>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-green-400 font-mono">₹{emp.salaryMonthly.toLocaleString()}/mo</span>
-                      <span className="text-xs text-slate-500">{emp.joinDate}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="hidden sm:block overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-slate-700 text-cyan-400 uppercase text-xs">
-                    <tr>
-                      <th className="p-3">Name</th>
-                      <th className="p-3">Email</th>
-                      <th className="p-3">Salary</th>
-                      <th className="p-3">Join Date</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-700">
-                    {employees.map((emp) => (
-                      <tr key={emp.$id} className="hover:bg-slate-700 transition">
-                        <td className="p-3 font-semibold text-white">{emp.name}</td>
-                        <td className="p-3 text-slate-400">{emp.email}</td>
-                        <td className="p-3 text-green-400 font-mono">₹{emp.salaryMonthly.toLocaleString()}</td>
-                        <td className="p-3 text-slate-500">{emp.joinDate}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {!isLoading && viewMode === "payroll" && (
-          <div className="space-y-4 sm:space-y-6">
-            <div className="bg-slate-800 rounded-lg sm:rounded-xl shadow-lg border border-slate-700 p-3 sm:p-6">
-              <h2 className="font-bold text-base sm:text-xl mb-3 sm:mb-4 text-cyan-400 flex items-center gap-2">
-                <CurrencyRupeeIcon className="w-4 h-4 sm:w-5 sm:h-5" />
-                Generate Payroll Report - Current Month
-              </h2>
-              <div className="flex flex-col sm:flex-row gap-3">
-                <button 
-                  onClick={handleGenerateReport}
-                  className="bg-cyan-600 hover:bg-cyan-500 text-white px-4 py-2.5 sm:py-3 rounded font-bold text-sm active:scale-95 transition w-full sm:w-auto"
+              <form onSubmit={handleCreateEmployee} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <input
+                  type="text"
+                  placeholder="Full Name"
+                  value={newEmpName}
+                  onChange={e => setNewEmpName(e.target.value)}
+                  className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+                  required
+                />
+                <input
+                  type="email"
+                  placeholder="Email"
+                  value={newEmpEmail}
+                  onChange={e => setNewEmpEmail(e.target.value)}
+                  className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+                  required
+                />
+                <input
+                  type="password"
+                  placeholder="Password"
+                  value={newEmpPassword}
+                  onChange={e => setNewEmpPassword(e.target.value)}
+                  className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+                  required
+                />
+                <input
+                  type="number"
+                  placeholder="Monthly Salary"
+                  value={newEmpSalary}
+                  onChange={e => setNewEmpSalary(e.target.value)}
+                  className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+                  required
+                />
+                <input
+                  type="date"
+                  placeholder="Join Date"
+                  value={newEmpJoinDate}
+                  onChange={e => setNewEmpJoinDate(e.target.value)}
+                  className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+                  required
+                />
+                <button
+                  type="submit"
+                  disabled={isCreatingEmp}
+                  className="bg-cyan-600 hover:bg-cyan-700 px-6 py-3 rounded-lg font-bold transition disabled:opacity-50"
                 >
-                  Generate Report for {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                  {isCreatingEmp ? 'Creating...' : 'Create Employee'}
                 </button>
-              </div>
-              <p className="text-xs text-slate-400 mt-2">
-                📊 Report will be generated for the current month attendance data
-              </p>
+              </form>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
-              <div className="lg:col-span-1 bg-slate-800 rounded-lg sm:rounded-xl shadow-lg border border-slate-700 overflow-hidden max-h-[500px] sm:max-h-[600px] flex flex-col">
-                <h3 className="p-3 sm:p-4 font-bold text-cyan-400 border-b border-slate-700 text-sm sm:text-base">Employees</h3>
-                <div className="overflow-y-auto flex-1">
-                  {reports.length === 0 ? (
-                    <div className="p-4 text-center text-slate-400 text-sm">
-                      <p>No reports generated yet.</p>
-                      <p className="text-xs mt-2">Select a month and click Generate Report</p>
-                    </div>
-                  ) : (
-                    reports.map((r) => (
-                      <button key={r.employeeId} onClick={() => setSelectedReportId(r.employeeId)} className={`w-full text-left p-3 border-b border-slate-700 transition hover:bg-slate-700 active:scale-98 ${selectedReportId === r.employeeId ? "bg-slate-700" : ""}`}>
-                        <p className="font-semibold text-white text-sm">{r.employeeName}</p>
-                        <p className="text-xs text-slate-400">{r.month}</p>
-                        <p className="text-xs text-green-400 font-mono mt-1">Net: {r.netSalary}</p>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </div>
+            {/* Holiday Management */}
+            <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
+              <h2 className="text-lg font-bold text-cyan-400 mb-4 flex items-center gap-2">
+                <CalendarDaysIcon className="w-6 h-6" />
+                Holiday Management
+              </h2>
 
-              <div className="lg:col-span-2 overflow-hidden">
-                {selectedReport ? (
-                  <div className="bg-slate-800 rounded-lg sm:rounded-xl shadow-lg border border-slate-700 overflow-hidden">
-                    <div className="p-3 sm:p-4 bg-gradient-to-r from-cyan-900/30 to-blue-900/30 border-b border-slate-700">
-                      <h3 className="text-lg sm:text-xl font-bold text-white mb-1">{selectedReport.employeeName}</h3>
-                      <p className="text-xs sm:text-sm text-slate-300">{selectedReport.month}</p>
-                      <p className="text-xl sm:text-2xl font-bold text-green-400 mt-2">Net: {selectedReport.netSalary}</p>
-                    </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 sm:gap-3 p-3 sm:p-4 bg-slate-900/50 border-b border-slate-700 text-center text-xs sm:text-sm">
-                      <div className="p-2"><span className="block text-xl sm:text-2xl font-bold text-green-400">{selectedReport.presentDays}</span>Present</div>
-                      <div className="p-2"><span className="block text-xl sm:text-2xl font-bold text-red-400">{selectedReport.absentDays}</span>Absent</div>
-                      <div className="p-2"><span className="block text-xl sm:text-2xl font-bold text-yellow-400">{selectedReport.halfDays}</span>Half</div>
-                      <div className="p-2"><span className="block text-xl sm:text-2xl font-bold text-cyan-400">{selectedReport.paidLeaveDays}</span>Leaves</div>
-                      <div className="p-2"><span className="block text-xl sm:text-2xl font-bold text-purple-400">{selectedReport.holidayDays}</span>Holiday</div>
-                    </div>
-                    
-                    <div className="block sm:hidden divide-y divide-slate-700 max-h-96 overflow-y-auto">
-                      {selectedReport.dailyBreakdown.map((d, i) => (
-                        <div key={i} className="p-3 hover:bg-slate-700/50 transition">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="font-mono text-slate-300 text-xs">{d.date}</span>
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-bold uppercase ${d.status === "Present" ? "bg-green-900/50 text-green-400" : d.status === "Absent" ? "bg-red-900/50 text-red-400" : "bg-yellow-900/50 text-yellow-400"}`}>{d.status}</span>
-                          </div>
-                          <div className="text-xs text-slate-400">
-                            <span>{d.inT} - {d.outT}</span>
-                            <span className="ml-2 font-mono">{d.dur > 0 ? d.dur.toFixed(1) + "h" : "-"}</span>
-                          </div>
-                          {d.notes && <p className="text-xs text-slate-500 mt-1">{d.notes}</p>}
-                        </div>
-                      ))}
-                    </div>
+              {/* Add Holiday Form */}
+              <form onSubmit={handleAddHoliday} className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                <input
+                  type="date"
+                  value={newHolidayDate}
+                  onChange={e => setNewHolidayDate(e.target.value)}
+                  className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+                  required
+                />
+                <input
+                  type="text"
+                  placeholder="Holiday Name"
+                  value={newHolidayName}
+                  onChange={e => setNewHolidayName(e.target.value)}
+                  className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+                  required
+                />
+                <input
+                  type="text"
+                  placeholder="Description"
+                  value={newHolidayDesc}
+                  onChange={e => setNewHolidayDesc(e.target.value)}
+                  className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+                />
+                <button
+                  type="submit"
+                  className="bg-green-600 hover:bg-green-700 px-6 py-3 rounded-lg font-bold transition flex items-center justify-center gap-2"
+                >
+                  <PlusCircleIcon className="w-5 h-5" />
+                  Add Holiday
+                </button>
+              </form>
 
-                    <div className="hidden sm:block p-3 sm:p-6 overflow-x-auto">
-                      <table className="w-full text-sm text-left border border-slate-700 rounded-lg overflow-hidden">
-                        <thead className="bg-slate-700 text-cyan-400 uppercase text-xs">
-                          <tr>
-                            <th className="p-3">Date</th>
-                            <th className="p-3">Status</th>
-                            <th className="p-3">In/Out</th>
-                            <th className="p-3 text-right">Dur</th>
-                            <th className="p-3">Notes</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-700">
-                          {selectedReport.dailyBreakdown.map((d, i) => (
-                            <tr key={i} className="hover:bg-slate-700 transition">
-                              <td className="p-3 font-mono text-slate-300 text-xs">{d.date} <span className="text-xs text-slate-500">({d.day})</span></td>
-                              <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-xs font-bold uppercase ${d.status === "Present" ? "bg-green-900/50 text-green-400" : d.status === "Absent" ? "bg-red-900/50 text-red-400" : "bg-yellow-900/50 text-yellow-400"}`}>{d.status}</span></td>
-                              <td className="p-3 text-xs font-medium text-slate-300">{d.inT} - {d.outT}</td>
-                              <td className="p-3 font-mono text-right text-slate-300">{d.dur > 0 ? d.dur.toFixed(1) + "h" : "-"}</td>
-                              <td className="p-3 text-xs text-slate-500">{d.notes}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
+              {/* Holidays List */}
+              <div className="space-y-2">
+                {holidays.length === 0 ? (
+                  <p className="text-center text-slate-500 py-4">No holidays configured</p>
                 ) : (
-                  <div className="p-8 bg-slate-800 rounded-lg sm:rounded-xl text-center text-slate-400 border border-slate-700">
-                    <ArrowLeftOnRectangleIcon className="w-12 h-12 mx-auto mb-3" />
-                    <p>Select an employee</p>
-                  </div>
+                  holidays.map(holiday => (
+                    <div key={holiday.$id} className="flex items-center justify-between bg-slate-700 p-3 rounded-lg">
+                      <div>
+                        <p className="font-bold text-white">{holiday.name}</p>
+                        <p className="text-sm text-slate-400">{holiday.date} - {holiday.description}</p>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteHoliday(holiday.$id, holiday.name)}
+                        className="text-red-400 hover:text-red-500 p-2"
+                      >
+                        <TrashIcon className="w-5 h-5" />
+                      </button>
+                    </div>
+                  ))
                 )}
               </div>
             </div>
           </div>
         )}
 
-        {!isLoading && viewMode === "audit" && (
-          <div className="bg-slate-800 rounded-lg sm:rounded-xl shadow-lg border border-slate-700 overflow-hidden">
-            <h2 className="font-bold text-base sm:text-xl p-3 sm:p-4 text-cyan-400 flex items-center gap-2 border-b border-slate-700">
-              <ClipboardDocumentListIcon className="w-4 h-4 sm:w-5 sm:h-5" />
-              Audit Log
-            </h2>
-
-            <div className="p-3 sm:p-4 bg-slate-900/50 border-b border-slate-700 space-y-3">
-              <label className="block text-xs font-bold text-slate-400">MANUAL CORRECTION</label>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <select className="flex-1 p-2.5 sm:p-3 rounded bg-slate-700 text-white border border-slate-600 text-sm" value={manualEmpId} onChange={(e) => setManualEmpId(e.target.value)}>
-                  <option value="">Select Employee</option>
-                  {employees.map(e => <option key={e.$id} value={e.$id}>{e.name}</option>)}
-                </select>
-                <select 
-                  className="flex-1 p-2.5 sm:p-3 rounded bg-slate-700 text-white border border-slate-600 text-sm" 
-                  value={manualAction} 
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    if (value === "check-in" || value === "check-out") {
-                      setManualAction(value as "check-in" | "check-out");
-                    }
-                  }}
-                >
-                  <option value="check-in">Check In</option>
-                  <option value="check-out">Check Out</option>
-                </select>
-                <input type="datetime-local" className="flex-1 p-2.5 sm:p-3 rounded bg-slate-700 text-white border border-slate-600 text-sm" value={manualDate} onChange={(e) => setManualDate(e.target.value)} />
-                <button onClick={handleManualEntry} disabled={isManualSubmitting} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 sm:py-3 rounded font-bold text-sm flex items-center justify-center gap-1 active:scale-95 transition">
-                  <PlusCircleIcon className="w-4 h-4" /> Add
-                </button>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-400 mb-2">SEARCH LOGS</label>
-                <div className="relative">
-                  <MagnifyingGlassIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-slate-400" />
-                  <input type="text" placeholder="Filter by Name..." value={auditFilter} onChange={(e) => { setAuditFilter(e.target.value); fetchAuditLogs(1, e.target.value); }} className="w-full p-2.5 sm:p-3 pl-10 rounded bg-slate-800 text-white border border-slate-600 focus:ring-1 focus:ring-cyan-500 text-sm" />
+        {/* PAYROLL TAB */}
+        {viewMode === 'payroll' && (
+          <div className="space-y-6">
+            {/* Month Selection and Actions */}
+            <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
+              <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
+                <div className="flex-1">
+                  <label className="block text-sm font-bold text-slate-400 mb-2">Select Month</label>
+                  <input
+                    type="month"
+                    value={selectedMonth}
+                    onChange={e => setSelectedMonth(e.target.value)}
+                    className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+                  />
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleGeneratePayroll}
+                    disabled={isGeneratingPayroll || !selectedMonth}
+                    className="bg-cyan-600 hover:bg-cyan-700 px-6 py-3 rounded-lg font-bold transition disabled:opacity-50 flex items-center gap-2"
+                  >
+                    <LockClosedIcon className="w-5 h-5" />
+                    {isGeneratingPayroll ? 'Generating...' : 'Generate Payroll'}
+                  </button>
                 </div>
               </div>
+
+              {/* Unlock Payroll Section */}
+              {payrollReports.length > 0 && payrollReports[0]?.isLocked && (
+                <div className="mt-4 pt-4 border-t border-slate-700">
+                  <h3 className="text-sm font-bold text-amber-400 mb-3">Unlock Payroll</h3>
+                  <div className="flex gap-3">
+                    <input
+                      type="text"
+                      placeholder="Reason for unlocking (required)"
+                      value={unlockReason}
+                      onChange={e => setUnlockReason(e.target.value)}
+                      className="flex-1 p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-amber-400"
+                    />
+                    <button
+                      onClick={handleUnlockPayroll}
+                      disabled={isUnlockingPayroll || !unlockReason.trim()}
+                      className="bg-amber-600 hover:bg-amber-700 px-6 py-3 rounded-lg font-bold transition disabled:opacity-50 flex items-center gap-2"
+                    >
+                      <LockOpenIcon className="w-5 h-5" />
+                      {isUnlockingPayroll ? 'Unlocking...' : 'Unlock'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-            
-            <div className="flex justify-between items-center p-3 sm:p-4 bg-slate-900 border-b border-slate-700 text-xs sm:text-sm">
-              <p className="text-slate-400 font-medium">Page {auditPage} of {Math.ceil(auditTotal / AUDIT_LIMIT)}</p>
-              <div className="flex gap-2">
-                <button onClick={() => setAuditPage(auditPage - 1)} disabled={auditPage === 1} className="px-3 py-1.5 bg-slate-700 text-slate-300 rounded text-xs hover:bg-slate-600 disabled:opacity-30 active:scale-95 transition">Prev</button>
-                <button onClick={() => setAuditPage(auditPage + 1)} disabled={auditPage * AUDIT_LIMIT >= auditTotal} className="px-3 py-1.5 bg-slate-700 text-slate-300 rounded text-xs hover:bg-slate-600 disabled:opacity-30 active:scale-95 transition">Next</button>
-              </div>
-            </div>
-            
-            <div className="block sm:hidden divide-y divide-slate-700 max-h-[500px] overflow-y-auto">
-              {logs.map((log) => (
-                <div key={log.$id} className="p-3 hover:bg-slate-700/50 transition">
-                  <div className="flex items-start justify-between mb-2">
-                    <div className="flex-1">
-                      <p className="font-semibold text-white text-sm mb-1">{log.employeeName}</p>
-                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-bold uppercase ${log.action === "check-in" ? "bg-green-900/50 text-green-400" : "bg-cyan-900/50 text-cyan-400"}`}>{log.action}</span>
+
+            {/* Payroll Reports */}
+            {payrollReports.length > 0 ? (
+              <div className="grid gap-4">
+                {payrollReports.map(report => (
+                  <div key={report.employeeId} className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
+                    <div
+                      className="p-4 cursor-pointer hover:bg-slate-750 transition"
+                      onClick={() => setSelectedReportId(selectedReportId === report.employeeId ? null : report.employeeId)}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="flex items-center gap-3">
+                             <h3 className="font-bold text-lg text-white">{report.employeeName}</h3>
+                             {/* RESET DEVICE BUTTON ADDED HERE */}
+                             <button
+                               onClick={(e) => {
+                                 e.stopPropagation(); 
+                                 handleResetDevice(report.employeeId, report.employeeName);
+                               }}
+                               className="p-1 text-slate-500 hover:text-cyan-400 transition"
+                               title="Reset Device Binding"
+                             >
+                               <DevicePhoneMobileIcon className="w-5 h-5" />
+                             </button>
+                          </div>
+                          <p className="text-sm text-slate-400">
+                            Base Salary: ₹{report.baseSalary} | Daily Rate: ₹{report.dailyRate}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-2xl font-bold text-cyan-400">₹{report.netSalary}</p>
+                          <p className="text-xs text-slate-400">
+                            {report.isLocked ? '🔒 Locked' : '🔓 Unlocked'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-3 md:grid-cols-6 gap-2 mt-4 text-sm">
+                        <div className="bg-green-900/30 px-3 py-2 rounded">
+                          <p className="text-green-400 font-bold">{report.presentDays}</p>
+                          <p className="text-xs text-slate-400">Present</p>
+                        </div>
+                        <div className="bg-yellow-900/30 px-3 py-2 rounded">
+                          <p className="text-yellow-400 font-bold">{report.halfDays}</p>
+                          <p className="text-xs text-slate-400">Half Day</p>
+                        </div>
+                        <div className="bg-red-900/30 px-3 py-2 rounded">
+                          <p className="text-red-400 font-bold">{report.absentDays}</p>
+                          <p className="text-xs text-slate-400">Absent</p>
+                        </div>
+                        <div className="bg-blue-900/30 px-3 py-2 rounded">
+                          <p className="text-blue-400 font-bold">{report.sundayDays}</p>
+                          <p className="text-xs text-slate-400">Sundays</p>
+                        </div>
+                        <div className="bg-purple-900/30 px-3 py-2 rounded">
+                          <p className="text-purple-400 font-bold">{report.holidayDays}</p>
+                          <p className="text-xs text-slate-400">Holidays</p>
+                        </div>
+                        <div className="bg-cyan-900/30 px-3 py-2 rounded">
+                          <p className="text-cyan-400 font-bold">{report.leaveDays}</p>
+                          <p className="text-xs text-slate-400">Leaves</p>
+                        </div>
+                      </div>
                     </div>
-                    <button onClick={() => handleDeleteLog(log.$id)} className="text-red-400 hover:text-red-300 p-2 rounded-full hover:bg-red-900/30 transition active:scale-95" title="Delete">
-                      <TrashIcon className="w-4 h-4" />
+
+                    {/* Daily Breakdown */}
+                    {selectedReportId === report.employeeId && report.dailyBreakdown && (
+                      <div className="border-t border-slate-700 p-4 bg-slate-900/50">
+                        <h4 className="font-bold text-cyan-400 mb-3">Daily Breakdown</h4>
+                        <div className="max-h-96 overflow-y-auto space-y-1">
+                          {report.dailyBreakdown.map((day: any, idx) => (
+                            <div key={idx} className="flex items-center justify-between bg-slate-800 p-2 rounded text-sm">
+                              <div className="flex items-center gap-3">
+                                <span className="text-slate-400 w-24">{day.date}</span>
+                                <span className="text-slate-400 w-12">{day.day}</span>
+                                <span className={`font-bold w-24 ${
+                                  day.status === 'Present' ? 'text-green-400' :
+                                  day.status === 'Half-Day' ? 'text-yellow-400' :
+                                  day.status === 'Absent' ? 'text-red-400' :
+                                  day.status === 'Sunday' ? 'text-blue-400' :
+                                  day.status === 'Holiday' ? 'text-purple-400' :
+                                  'text-slate-400'
+                                }`}>
+                                  {day.status}
+                                </span>
+                                {/* EDIT BUTTON ADDED HERE */}
+                                <button 
+                                  onClick={() => openEditModal(day)}
+                                  className="text-slate-500 hover:text-cyan-400 p-1"
+                                  title="Edit Attendance"
+                                >
+                                  <PencilSquareIcon className="w-4 h-4" />
+                                </button>
+                              </div>
+                              <div className="flex items-center gap-4 text-xs">
+                                <span className="text-slate-400">{day.checkIn}</span>
+                                <span className="text-slate-600">→</span>
+                                <span className="text-slate-400">{day.checkOut}</span>
+                                <span className="text-cyan-400 w-16 text-right">{day.hours.toFixed(1)}h</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="bg-slate-800 rounded-lg p-12 border border-slate-700 text-center">
+                <CurrencyRupeeIcon className="w-16 h-16 text-slate-600 mx-auto mb-4" />
+                <p className="text-slate-400">No payroll data for selected month</p>
+                <p className="text-sm text-slate-500 mt-2">Select a month and generate payroll to view reports</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* AUDIT TAB */}
+        {viewMode === 'audit' && (
+          <div className="space-y-6">
+            {/* Filters */}
+            <div className="bg-slate-800 rounded-lg p-4 border border-slate-700 flex items-center gap-4">
+              <MagnifyingGlassIcon className="w-5 h-5 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Filter by action (e.g., check-in, check-out)..."
+                value={auditFilter}
+                onChange={e => handleAuditFilterChange(e.target.value)}
+                className="flex-1 p-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+              />
+            </div>
+
+            {/* Audit Logs */}
+            <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
+              <div className="max-h-[600px] overflow-y-auto">
+                {auditLogs.length === 0 ? (
+                  <div className="p-12 text-center">
+                    <ClipboardDocumentListIcon className="w-16 h-16 text-slate-600 mx-auto mb-4" />
+                    <p className="text-slate-400">No audit logs found</p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-slate-700">
+                    {auditLogs.map(log => (
+                      <div key={log.id} className="p-4 hover:bg-slate-750 transition">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-1">
+                              <span className={`px-2 py-1 rounded text-xs font-bold ${
+                                log.action === 'check-in' ? 'bg-green-900/50 text-green-400' :
+                                log.action === 'check-out' ? 'bg-red-900/50 text-red-400' :
+                                'bg-cyan-900/50 text-cyan-400'
+                              }`}>
+                                {log.action}
+                              </span>
+                              <span className="font-bold text-white">{log.actorName}</span>
+                              {log.signatureVerified && (
+                                <ShieldCheckIcon className="w-4 h-4 text-green-400" title="Signature Verified" />
+                              )}
+                            </div>
+                            <p className="text-sm text-slate-400 mb-1">{log.details}</p>
+                            <p className="text-xs text-slate-500">{formatDateTime(log.timestamp)}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Pagination */}
+              {auditTotal > AUDIT_LIMIT && (
+                <div className="border-t border-slate-700 p-4 flex items-center justify-between">
+                  <p className="text-sm text-slate-400">
+                    Showing {(auditPage - 1) * AUDIT_LIMIT + 1} - {Math.min(auditPage * AUDIT_LIMIT, auditTotal)} of {auditTotal}
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => fetchAuditLogs(auditPage - 1)}
+                      disabled={auditPage === 1}
+                      className="px-4 py-2 bg-slate-700 rounded-lg font-bold hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Previous
+                    </button>
+                    <button
+                      onClick={() => fetchAuditLogs(auditPage + 1)}
+                      disabled={auditPage * AUDIT_LIMIT >= auditTotal}
+                      className="px-4 py-2 bg-slate-700 rounded-lg font-bold hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Next
                     </button>
                   </div>
-                  <p className="text-xs text-slate-400 font-mono mb-1">{formatTimestamp(log.timestamp)}</p>
-                  <p className="text-xs text-slate-500 truncate">{log.device}</p>
                 </div>
-              ))}
-            </div>
-
-            <div className="hidden sm:block overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-slate-700 text-cyan-400 uppercase text-xs">
-                  <tr>
-                    <th className="p-3">Timestamp (IST)</th>
-                    <th className="p-3">Employee</th>
-                    <th className="p-3">Action</th>
-                    <th className="p-3">Device / Note</th>
-                    <th className="p-3 text-right">Manage</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-700">
-                  {logs.map((log) => (
-                    <tr key={log.$id} className="hover:bg-slate-700 transition">
-                      <td className="p-3 text-slate-400 font-mono text-xs">{formatTimestamp(log.timestamp)}</td>
-                      <td className="p-3 font-semibold text-white">{log.employeeName}</td>
-                      <td className="p-3 uppercase font-bold text-xs"><span className={`px-3 py-1 rounded-full ${log.action === "check-in" ? "bg-green-900/50 text-green-400" : "bg-cyan-900/50 text-cyan-400"}`}>{log.action}</span></td>
-                      <td className="p-3 font-mono text-xs text-slate-500 max-w-xs truncate">{log.device}</td>
-                      <td className="p-3 text-right">
-                        <button onClick={() => handleDeleteLog(log.$id)} className="text-red-400 hover:text-red-300 p-1 rounded hover:bg-red-900/30 transition" title="Delete Log">
-                          <TrashIcon className="w-4 h-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              )}
             </div>
           </div>
         )}
 
-        {!isLoading && viewMode === "settings" && (
-          <div className="max-w-2xl mx-auto">
-            <div className="bg-slate-800 p-4 sm:p-8 rounded-lg sm:rounded-xl shadow-lg border border-slate-700">
-              <h2 className="font-bold text-xl sm:text-2xl mb-4 sm:mb-6 text-slate-200 flex items-center gap-2 sm:gap-3 border-b border-slate-700 pb-3 sm:pb-4">
-                <Cog6ToothIcon className="w-6 h-6 sm:w-7 sm:h-7 text-slate-400" />
-                Admin Settings
+        {/* SETTINGS TAB */}
+        {viewMode === 'settings' && (
+          <div className="space-y-6">
+            <div className="bg-slate-800 rounded-lg p-6 border border-slate-700 max-w-md">
+              <h2 className="text-lg font-bold text-cyan-400 mb-4 flex items-center gap-2">
+                <Cog6ToothIcon className="w-6 h-6" />
+                Change Password
               </h2>
-              
-              <div className="bg-slate-900/50 p-4 sm:p-6 rounded-lg border border-slate-700">
-                <h3 className="text-base sm:text-lg font-bold text-cyan-400 mb-3 sm:mb-4">Change Password</h3>
-                <form onSubmit={handleUpdatePassword} className="space-y-3 sm:space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Current Password</label>
-                    <input type="password" required className="w-full bg-slate-800 border border-slate-600 rounded p-2.5 sm:p-3 text-white focus:border-cyan-500 outline-none transition text-sm" placeholder="Enter your current password" value={oldPass} onChange={(e) => setOldPass(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-1">New Password</label>
-                    <input type="password" required minLength={8} className="w-full bg-slate-800 border border-slate-600 rounded p-2.5 sm:p-3 text-white focus:border-cyan-500 outline-none transition text-sm" placeholder="Enter new secure password" value={newPass} onChange={(e) => setNewPass(e.target.value)} />
-                  </div>
-                  <div className="pt-2">
-                    <button disabled={isUpdatingAuth} className="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2.5 sm:py-3 rounded-lg transition shadow-lg disabled:opacity-50 active:scale-95 text-sm">
-                      {isUpdatingAuth ? "Updating..." : "Update Password"}
-                    </button>
-                  </div>
-                </form>
-              </div>
+              <form onSubmit={handleChangePassword} className="space-y-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase block mb-1">Old Password</label>
+                  <input
+                    type="password"
+                    value={oldPassword}
+                    onChange={e => setOldPassword(e.target.value)}
+                    className="w-full p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase block mb-1">New Password</label>
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={e => setNewPassword(e.target.value)}
+                    className="w-full p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+                    required
+                  />
+                </div>
 
-              <div className="mt-6 sm:mt-8 pt-4 sm:pt-6 border-t border-slate-700 text-center">
-                <p className="text-slate-500 text-xs sm:text-sm mb-3 sm:mb-4">Need to sign out securely?</p>
-                <button onClick={handleLogout} className="text-red-400 hover:text-red-300 font-bold text-sm flex items-center justify-center gap-2 mx-auto active:scale-95 transition">
-                  <ArrowLeftOnRectangleIcon className="w-4 h-4" /> Sign Out
+                {passwordMsg && (
+                  <div className={`p-3 rounded-lg font-bold text-sm ${
+                    passwordMsg.includes('❌') ? 'bg-red-900/50 text-red-400' : 'bg-green-900/50 text-green-400'
+                  }`}>
+                    {passwordMsg}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  className="w-full bg-cyan-600 hover:bg-cyan-700 px-6 py-3 rounded-lg font-bold transition"
+                >
+                  Update Password
                 </button>
-              </div>
+              </form>
             </div>
           </div>
         )}
+
+        {/* --- EDIT ATTENDANCE MODAL (ADDED) --- */}
+        {editingAttendance && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+            <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md border border-slate-700">
+              <h3 className="text-xl font-bold text-white mb-4">Edit Attendance ({editingAttendance.date})</h3>
+              <form onSubmit={handleSubmitEdit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">New Check-In (HH:MM)</label>
+                  <input 
+                    type="time" 
+                    value={editCheckIn} 
+                    onChange={e => setEditCheckIn(e.target.value)}
+                    className="w-full p-2 bg-slate-700 border border-slate-600 rounded text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">New Check-Out (HH:MM)</label>
+                  <input 
+                    type="time" 
+                    value={editCheckOut} 
+                    onChange={e => setEditCheckOut(e.target.value)}
+                    className="w-full p-2 bg-slate-700 border border-slate-600 rounded text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">Reason (Required)</label>
+                  <input 
+                    type="text" 
+                    required
+                    value={editReason} 
+                    onChange={e => setEditReason(e.target.value)}
+                    placeholder="e.g. Forgot to punch out"
+                    className="w-full p-2 bg-slate-700 border border-slate-600 rounded text-white"
+                  />
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <button 
+                    type="button" 
+                    onClick={() => setEditingAttendance(null)}
+                    className="flex-1 py-2 bg-slate-700 hover:bg-slate-600 rounded font-bold transition"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="submit" 
+                    className="flex-1 py-2 bg-cyan-600 hover:bg-cyan-700 rounded font-bold transition"
+                  >
+                    Save Changes
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );
