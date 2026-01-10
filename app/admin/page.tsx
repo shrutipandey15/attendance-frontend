@@ -14,17 +14,32 @@ import {
   getHolidays,
   getAuditLogs,
   modifyAttendance,
-  resetEmployeeDevice
+  resetEmployeeDevice,
+  addOfficeLocation
 } from '../../lib/api';
 import type { User, PayrollRecord, Holiday, AuditLog } from '../../lib/api';
 import {
   ShieldCheckIcon, UserPlusIcon, CalendarDaysIcon, CurrencyRupeeIcon,
   ClipboardDocumentListIcon, Cog6ToothIcon, PlusCircleIcon, TrashIcon,
   MagnifyingGlassIcon, LockOpenIcon, LockClosedIcon, 
-  PencilSquareIcon, DevicePhoneMobileIcon // <--- ADDED ICONS
+  PencilSquareIcon, DevicePhoneMobileIcon, MapPinIcon
 } from '@heroicons/react/24/outline';
 
 type ViewMode = 'manage' | 'payroll' | 'audit' | 'settings';
+
+const getCurrentLocation = (): Promise<GeolocationPosition> => {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error('Geolocation not supported'));
+    } else {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0
+      });
+    }
+  });
+};
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -45,6 +60,13 @@ export default function AdminDashboard() {
   const [newHolidayDesc, setNewHolidayDesc] = useState('');
   const [holidays, setHolidays] = useState<Holiday[]>([]);
 
+  // Office Location State (NEW)
+  const [officeName, setOfficeName] = useState('');
+  const [officeLat, setOfficeLat] = useState('');
+  const [officeLng, setOfficeLng] = useState('');
+  const [officeRadius, setOfficeRadius] = useState('100');
+  const [isGettingLoc, setIsGettingLoc] = useState(false);
+
   // Payroll Tab State
   const [selectedMonth, setSelectedMonth] = useState('');
   const [payrollReports, setPayrollReports] = useState<PayrollRecord[]>([]);
@@ -53,7 +75,7 @@ export default function AdminDashboard() {
   const [isUnlockingPayroll, setIsUnlockingPayroll] = useState(false);
   const [unlockReason, setUnlockReason] = useState('');
 
-  // Attendance Editing State (ADDED)
+  // Attendance Editing State
   const [editingAttendance, setEditingAttendance] = useState<any>(null);
   const [editCheckIn, setEditCheckIn] = useState('');
   const [editCheckOut, setEditCheckOut] = useState('');
@@ -187,6 +209,47 @@ export default function AdminDashboard() {
       alert(`Error: ${error.message}`);
     }
   };
+  const handleAddOffice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!officeLat || !officeLng) {
+      alert("Latitude and Longitude are required");
+      return;
+    }
+
+    try {
+      const result = await addOfficeLocation(
+        officeName, 
+        parseFloat(officeLat), 
+        parseFloat(officeLng), 
+        parseInt(officeRadius)
+      );
+
+      if (result.success) {
+        alert('✅ Office Location Added! Employees can now check in here.');
+        setOfficeName('');
+        setOfficeLat('');
+        setOfficeLng('');
+        setOfficeRadius('100');
+      } else {
+        alert(`❌ ${result.message}`);
+      }
+    } catch (error: any) {
+      alert(`Error: ${error.message}`);
+    }
+  };
+
+  const handleGetMyLocation = async () => {
+    setIsGettingLoc(true);
+    try {
+      const pos = await getCurrentLocation();
+      setOfficeLat(pos.coords.latitude.toFixed(6));
+      setOfficeLng(pos.coords.longitude.toFixed(6));
+    } catch (error: any) {
+      alert("Could not get location. Ensure GPS is enabled.");
+    } finally {
+      setIsGettingLoc(false);
+    }
+  };
 
   // ============================================
   // PAYROLL TAB FUNCTIONS
@@ -264,9 +327,7 @@ export default function AdminDashboard() {
     }
   };
 
-  // --- NEW: Handle Device Reset ---
   const handleResetDevice = async (employeeId: string, employeeName: string) => {
-    // Prevent bubbling if clicked inside accordion header
     if (!confirm(`Reset device binding for ${employeeName}? They will need to re-register their device.`)) return;
     
     const reason = prompt("Enter reason for reset (required):");
@@ -284,20 +345,17 @@ export default function AdminDashboard() {
     }
   };
 
-  // --- NEW: Open Edit Modal ---
   const openEditModal = (day: any) => {
     if (!day.id) {
         alert("Cannot edit this record (ID missing). Please regenerate payroll.");
         return;
     }
     setEditingAttendance(day);
-    // Reset inputs
     setEditCheckIn(''); 
     setEditCheckOut('');
     setEditReason('');
   };
 
-  // --- NEW: Submit Attendance Edit ---
   const handleSubmitEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingAttendance || !editReason) {
@@ -308,15 +366,7 @@ export default function AdminDashboard() {
     try {
       const modifications: any = {};
       
-      // If user entered time, assume it is for the record's date
-      // NOTE: This assumes Local Time input. We append :00Z or convert as needed.
-      // For simplicity in this demo, we assume the user inputs HH:MM and we append it to the date YYYY-MM-DD
-      
       if (editCheckIn) {
-        // Construct ISO string: "2024-01-20T09:00:00.000Z" (Assuming UTC/Server time expectation)
-        // Or better, let the backend handle the date part if you send just time.
-        // But your backend expects ISO strings. 
-        // Let's attach the time to the date.
         modifications.checkInTime = `${editingAttendance.date}T${editCheckIn}:00.000Z`;
       }
       
@@ -324,15 +374,12 @@ export default function AdminDashboard() {
         modifications.checkOutTime = `${editingAttendance.date}T${editCheckOut}:00.000Z`;
       }
 
-      // Allow status change directly if needed, or let backend recalc based on time
-      // modifications.status = 'present'; // Optional: Add a dropdown for status if you want manual override
-
       const result = await modifyAttendance(editingAttendance.id, editReason, modifications);
       
       if (result.success) {
         alert('✅ Attendance updated!');
         setEditingAttendance(null);
-        fetchPayrollReport(); // Refresh data to show changes
+        fetchPayrollReport();
       } else {
         alert(`❌ ${result.message}`);
       }
@@ -541,6 +588,73 @@ export default function AdminDashboard() {
               </form>
             </div>
 
+            {/* Office Locations Management (ADDED) */}
+            <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
+              <h2 className="text-lg font-bold text-cyan-400 mb-4 flex items-center gap-2">
+                <MapPinIcon className="w-6 h-6" />
+                Office Locations
+              </h2>
+              
+              <form onSubmit={handleAddOffice} className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <input
+                      type="text"
+                      placeholder="Location Name (e.g. HQ)"
+                      value={officeName}
+                      onChange={e => setOfficeName(e.target.value)}
+                      className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white"
+                      required
+                    />
+                     <input
+                      type="number"
+                      placeholder="Radius (Meters)"
+                      value={officeRadius}
+                      onChange={e => setOfficeRadius(e.target.value)}
+                      className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white"
+                      required
+                    />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="flex gap-2">
+                        <input
+                          type="number"
+                          step="any"
+                          placeholder="Latitude"
+                          value={officeLat}
+                          onChange={e => setOfficeLat(e.target.value)}
+                          className="flex-1 p-3 bg-slate-700 border border-slate-600 rounded-lg text-white"
+                          required
+                        />
+                         <input
+                          type="number"
+                          step="any"
+                          placeholder="Longitude"
+                          value={officeLng}
+                          onChange={e => setOfficeLng(e.target.value)}
+                          className="flex-1 p-3 bg-slate-700 border border-slate-600 rounded-lg text-white"
+                          required
+                        />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleGetMyLocation}
+                      disabled={isGettingLoc}
+                      className="bg-slate-700 hover:bg-slate-600 border border-slate-600 text-cyan-400 px-4 py-3 rounded-lg font-bold transition flex items-center justify-center gap-2"
+                    >
+                      <MapPinIcon className="w-5 h-5" />
+                      {isGettingLoc ? "Locating..." : "Get My Current Location"}
+                    </button>
+                </div>
+                
+                <button
+                  type="submit"
+                  className="w-full bg-cyan-600 hover:bg-cyan-700 px-6 py-3 rounded-lg font-bold transition"
+                >
+                  Add Office Location
+                </button>
+              </form>
+            </div>
+
             {/* Holiday Management */}
             <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
               <h2 className="text-lg font-bold text-cyan-400 mb-4 flex items-center gap-2">
@@ -548,7 +662,6 @@ export default function AdminDashboard() {
                 Holiday Management
               </h2>
 
-              {/* Add Holiday Form */}
               <form onSubmit={handleAddHoliday} className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
                 <input
                   type="date"
@@ -581,7 +694,6 @@ export default function AdminDashboard() {
                 </button>
               </form>
 
-              {/* Holidays List */}
               <div className="space-y-2">
                 {holidays.length === 0 ? (
                   <p className="text-center text-slate-500 py-4">No holidays configured</p>
@@ -609,7 +721,6 @@ export default function AdminDashboard() {
         {/* PAYROLL TAB */}
         {viewMode === 'payroll' && (
           <div className="space-y-6">
-            {/* Month Selection and Actions */}
             <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
               <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
                 <div className="flex-1">
@@ -633,7 +744,6 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              {/* Unlock Payroll Section */}
               {payrollReports.length > 0 && payrollReports[0]?.isLocked && (
                 <div className="mt-4 pt-4 border-t border-slate-700">
                   <h3 className="text-sm font-bold text-amber-400 mb-3">Unlock Payroll</h3>
@@ -658,7 +768,6 @@ export default function AdminDashboard() {
               )}
             </div>
 
-            {/* Payroll Reports */}
             {payrollReports.length > 0 ? (
               <div className="grid gap-4">
                 {payrollReports.map(report => (
@@ -671,7 +780,6 @@ export default function AdminDashboard() {
                         <div>
                           <div className="flex items-center gap-3">
                              <h3 className="font-bold text-lg text-white">{report.employeeName}</h3>
-                             {/* RESET DEVICE BUTTON ADDED HERE */}
                              <button
                                onClick={(e) => {
                                  e.stopPropagation(); 
@@ -723,7 +831,6 @@ export default function AdminDashboard() {
                       </div>
                     </div>
 
-                    {/* Daily Breakdown */}
                     {selectedReportId === report.employeeId && report.dailyBreakdown && (
                       <div className="border-t border-slate-700 p-4 bg-slate-900/50">
                         <h4 className="font-bold text-cyan-400 mb-3">Daily Breakdown</h4>
@@ -743,7 +850,6 @@ export default function AdminDashboard() {
                                 }`}>
                                   {day.status}
                                 </span>
-                                {/* EDIT BUTTON ADDED HERE */}
                                 <button 
                                   onClick={() => openEditModal(day)}
                                   className="text-slate-500 hover:text-cyan-400 p-1"
@@ -779,7 +885,6 @@ export default function AdminDashboard() {
         {/* AUDIT TAB */}
         {viewMode === 'audit' && (
           <div className="space-y-6">
-            {/* Filters */}
             <div className="bg-slate-800 rounded-lg p-4 border border-slate-700 flex items-center gap-4">
               <MagnifyingGlassIcon className="w-5 h-5 text-slate-400" />
               <input
@@ -791,7 +896,6 @@ export default function AdminDashboard() {
               />
             </div>
 
-            {/* Audit Logs */}
             <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
               <div className="max-h-[600px] overflow-y-auto">
                 {auditLogs.length === 0 ? (
@@ -828,7 +932,6 @@ export default function AdminDashboard() {
                 )}
               </div>
 
-              {/* Pagination */}
               {auditTotal > AUDIT_LIMIT && (
                 <div className="border-t border-slate-700 p-4 flex items-center justify-between">
                   <p className="text-sm text-slate-400">
@@ -905,7 +1008,7 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* --- EDIT ATTENDANCE MODAL (ADDED) --- */}
+        {/* EDIT ATTENDANCE MODAL */}
         {editingAttendance && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
             <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md border border-slate-700">

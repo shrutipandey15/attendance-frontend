@@ -17,16 +17,33 @@ import {
 import type { User, AttendanceRecord } from '../lib/api';
 import {
     PencilSquareIcon, ArrowRightIcon, ArrowLeftIcon,
-    CalendarDaysIcon, XMarkIcon, ShieldCheckIcon, ExclamationTriangleIcon
+    CalendarDaysIcon, XMarkIcon, ShieldCheckIcon, ExclamationTriangleIcon,
+    MapPinIcon // Added Icon
 } from '@heroicons/react/24/outline';
 
 import { ADMIN_TEAM_ID } from '../lib/constants';
+
+// --- HELPER: Get Current Location ---
+const getCurrentLocation = (): Promise<GeolocationPosition> => {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error('Geolocation is not supported by your browser'));
+    } else {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 10000, // Wait up to 10s for high accuracy
+        maximumAge: 0   // Do not use cached position
+      });
+    }
+  });
+};
 
 export default function Home() {
   const router = useRouter();
   const [view, setView] = useState<'login' | 'dashboard'>('login');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [locationStatus, setLocationStatus] = useState<string>('');
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -152,7 +169,7 @@ export default function Home() {
         setLoginError(result.message || 'Login failed');
         setLoading(false);
       }
-    } catch (error: unknown) {
+    } catch (error: any) {
       setLoading(false);
       setLoginError("Network error. Please try again.");
       console.error(error);
@@ -163,11 +180,31 @@ export default function Home() {
     if (!user) return;
 
     setActionLoading(true);
+    setLocationStatus('Acquiring location...');
 
     try {
+      // 1. GET GEOLOCATION
+      let locationData = null;
+      try {
+        const position = await getCurrentLocation();
+        locationData = {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: position.coords.accuracy
+        };
+        setLocationStatus('Location acquired');
+      } catch (e: any) {
+        console.warn("Location failed", e);
+        // Fail if location is mandatory for your use case
+        alert(`⚠️ Location Error: ${e.message}. Please enable GPS and try again.`);
+        setActionLoading(false);
+        setLocationStatus('');
+        return; 
+      }
+
       const intent = currentStatus === 'checked-in' ? 'check-out' : 'check-in';
 
-      // Check if device is bound
+      // 2. CHECK DEVICE BINDING
       let isBound = await isDeviceBound();
 
       if (!isBound) {
@@ -185,14 +222,16 @@ export default function Home() {
         if (!registerResult.success) {
           alert(registerResult.message || 'Failed to register device');
           setActionLoading(false);
+          setLocationStatus('');
           return;
         }
       }
 
-      // Perform check-in or check-out
+      // 3. PERFORM CHECK-IN / CHECK-OUT
+      // Pass locationData to the API
       const result = intent === 'check-in'
-        ? await checkIn(user.$id, user.email)
-        : await checkOut(user.$id, user.email);
+        ? await checkIn(user.$id, user.email, locationData)
+        : await checkOut(user.$id, user.email, locationData);
 
       if (result.success) {
         alert(`✅ ${result.message}`);
@@ -217,11 +256,12 @@ export default function Home() {
           alert(`❌ ${result.message}`);
         }
       }
-    } catch (error: unknown) {
+    } catch (error: any) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
       alert(`🚨 Error: ${errorMessage}`);
     } finally {
       setActionLoading(false);
+      setLocationStatus('');
     }
   };
 
@@ -247,7 +287,7 @@ export default function Home() {
       } else {
         setPwdMsg(`❌ ${result.message}`);
       }
-    } catch (err: unknown) {
+    } catch (err: any) {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
       setPwdMsg('❌ Error: ' + errorMessage);
     }
@@ -364,29 +404,41 @@ export default function Home() {
           </div>
 
           {/* Check-in/Check-out Button */}
-          <button
-            onClick={performAttendance}
-            disabled={actionLoading || loading}
-            className={`w-44 h-44 sm:w-60 sm:h-60 rounded-full border-4 sm:border-8 shadow-2xl flex flex-col items-center justify-center transition-all duration-300 transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
-              currentStatus === 'checked-in'
-                ? 'bg-red-900/40 border-red-700 text-red-400 hover:bg-red-900/60'
-                : 'bg-green-900/40 border-green-700 text-green-400 hover:bg-green-900/60'
-            }`}
-          >
-            <span className="mb-1 sm:mb-2">
-              {currentStatus === 'checked-in' ? (
-                <ArrowLeftIcon className="w-12 h-12 sm:w-16 sm:h-16" />
-              ) : (
-                <ArrowRightIcon className="w-12 h-12 sm:w-16 sm:h-16" />
-              )}
-            </span>
-            <span className="font-extrabold text-lg sm:text-2xl tracking-wider">
-              {currentStatus === 'checked-in' ? 'CHECK OUT' : 'CHECK IN'}
-            </span>
-            <span className="text-xs sm:text-sm uppercase mt-1 sm:mt-2 font-semibold opacity-60 text-slate-300 px-2 text-center">
-              {actionLoading ? 'Processing...' : (currentStatus === 'checked-in' ? 'End Shift' : 'Start Shift')}
-            </span>
-          </button>
+          <div className="relative">
+            <button
+              onClick={performAttendance}
+              disabled={actionLoading || loading}
+              className={`w-44 h-44 sm:w-60 sm:h-60 rounded-full border-4 sm:border-8 shadow-2xl flex flex-col items-center justify-center transition-all duration-300 transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${
+                currentStatus === 'checked-in'
+                  ? 'bg-red-900/40 border-red-700 text-red-400 hover:bg-red-900/60'
+                  : 'bg-green-900/40 border-green-700 text-green-400 hover:bg-green-900/60'
+              }`}
+            >
+              <span className="mb-1 sm:mb-2">
+                {currentStatus === 'checked-in' ? (
+                  <ArrowLeftIcon className="w-12 h-12 sm:w-16 sm:h-16" />
+                ) : (
+                  <ArrowRightIcon className="w-12 h-12 sm:w-16 sm:h-16" />
+                )}
+              </span>
+              <span className="font-extrabold text-lg sm:text-2xl tracking-wider">
+                {currentStatus === 'checked-in' ? 'CHECK OUT' : 'CHECK IN'}
+              </span>
+              <span className="text-xs sm:text-sm uppercase mt-1 sm:mt-2 font-semibold opacity-60 text-slate-300 px-2 text-center">
+                {actionLoading ? 'Processing...' : (currentStatus === 'checked-in' ? 'End Shift' : 'Start Shift')}
+              </span>
+            </button>
+
+            {/* Location Status Indicator (NEW) */}
+            {actionLoading && locationStatus && (
+              <div className="absolute -bottom-8 left-0 right-0 text-center">
+                <span className="text-xs text-cyan-400 font-mono animate-pulse flex items-center justify-center gap-1">
+                  <MapPinIcon className="w-3 h-3" />
+                  {locationStatus}
+                </span>
+              </div>
+            )}
+          </div>
 
           {/* Status Badge */}
           <div className={`px-4 sm:px-6 py-2.5 sm:py-3 rounded-lg sm:rounded-xl font-mono text-sm sm:text-base font-bold border shadow-inner ${
