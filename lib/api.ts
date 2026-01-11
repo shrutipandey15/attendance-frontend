@@ -69,6 +69,7 @@ export interface PayrollRecord {
   netSalary: string;
   isLocked: boolean;
   dailyBreakdown: Array<{
+    id: string; // Ensure ID is included for edits
     date: string;
     day: string;
     status: string;
@@ -164,9 +165,6 @@ export async function getCurrentUser(): Promise<User | null> {
   }
 }
 
-/**
- * Get current location
- */
 export async function getCurrentLocation(): Promise<Location> {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
@@ -271,10 +269,14 @@ export async function registerDevice(
 // ATTENDANCE - EMPLOYEE
 // ============================================
 
-export async function checkIn(userId: string, email: string): Promise<ApiResponse> {
+/**
+ * Check In
+ * Updated to accept optional location data from UI
+ */
+export async function checkIn(userId: string, email: string, locationData?: Location): Promise<ApiResponse> {
   try {
-    // Get location
-    const location = await getCurrentLocation();
+    // Use passed location OR fetch it if missing
+    const location = locationData || await getCurrentLocation();
 
     // Generate signature
     const today = formatDate(new Date());
@@ -296,10 +298,9 @@ export async function checkIn(userId: string, email: string): Promise<ApiRespons
   }
 }
 
-export async function checkOut(userId: string, email: string): Promise<ApiResponse> {
+export async function checkOut(userId: string, email: string, locationData?: Location): Promise<ApiResponse> {
   try {
-    // Get location
-    const location = await getCurrentLocation();
+    const location = locationData || await getCurrentLocation();
 
     // Generate signature
     const today = formatDate(new Date());
