@@ -15,7 +15,8 @@ import {
   getAuditLogs,
   modifyAttendance,
   resetEmployeeDevice,
-  addOfficeLocation
+  addOfficeLocation,
+  getEmployees
 } from '../../lib/api';
 import type { User, PayrollRecord, Holiday, AuditLog } from '../../lib/api';
 import {
@@ -59,6 +60,7 @@ export default function AdminDashboard() {
   const [newHolidayName, setNewHolidayName] = useState('');
   const [newHolidayDesc, setNewHolidayDesc] = useState('');
   const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [employees, setEmployees] = useState<any[]>([]);
 
   // Office Location State (NEW)
   const [officeName, setOfficeName] = useState('');
@@ -100,6 +102,7 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (viewMode === 'manage') {
       fetchHolidays();
+      fetchEmployees();
     } else if (viewMode === 'payroll') {
       // Set default month to current
       const now = new Date();
@@ -248,6 +251,17 @@ export default function AdminDashboard() {
       alert("Could not get location. Ensure GPS is enabled.");
     } finally {
       setIsGettingLoc(false);
+    }
+  };
+
+  const fetchEmployees = async () => {
+    try {
+      const result = await getEmployees();
+      if (result.success && result.data) {
+        setEmployees(result.data.employees);
+      }
+    } catch (error) {
+      console.error('Failed to fetch employees:', error);
     }
   };
 
@@ -586,6 +600,55 @@ export default function AdminDashboard() {
                   {isCreatingEmp ? 'Creating...' : 'Create Employee'}
                 </button>
               </form>
+            </div>
+
+            {/* EMPLOYEE LIST SECTION */}
+            <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
+              <h2 className="text-lg font-bold text-cyan-400 mb-4 flex items-center gap-2">
+                <ClipboardDocumentListIcon className="w-6 h-6" />
+                All Employees ({employees.length})
+              </h2>
+              
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm text-slate-400">
+                  <thead className="bg-slate-700 text-xs uppercase font-bold text-slate-300">
+                    <tr>
+                      <th className="px-4 py-3">Name</th>
+                      <th className="px-4 py-3">Email</th>
+                      <th className="px-4 py-3">Salary</th>
+                      <th className="px-4 py-3">Join Date</th>
+                      <th className="px-4 py-3">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-700">
+                    {employees.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-8 text-center text-slate-500 italic">
+                          No employees found. Add one above.
+                        </td>
+                      </tr>
+                    ) : (
+                      employees.map((emp) => (
+                        <tr key={emp.$id} className="hover:bg-slate-750 transition">
+                          <td className="px-4 py-3 font-bold text-white">{emp.name}</td>
+                          <td className="px-4 py-3">{emp.email}</td>
+                          <td className="px-4 py-3 text-cyan-400 font-mono">₹{emp.salaryMonthly?.toLocaleString()}</td>
+                          <td className="px-4 py-3">{new Date(emp.joinDate).toLocaleDateString()}</td>
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-1 rounded-full text-xs font-bold ${
+                              emp.isActive 
+                                ? 'bg-green-900/50 text-green-400 border border-green-800' 
+                                : 'bg-red-900/50 text-red-400 border border-red-800'
+                            }`}>
+                              {emp.isActive ? 'Active' : 'Inactive'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             {/* Office Locations Management (ADDED) */}
