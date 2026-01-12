@@ -1,11 +1,12 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   getCurrentUser,
   logout as apiLogout,
   changePassword as apiChangePassword,
   createEmployee,
+  updateEmployee,
   getPayrollReport,
   generatePayroll,
   unlockPayroll,
@@ -16,14 +17,16 @@ import {
   modifyAttendance,
   resetEmployeeDevice,
   addOfficeLocation,
-  getEmployees
+  getEmployees,
+  deletePayroll
 } from '../../lib/api';
 import type { User, PayrollRecord, Holiday, AuditLog } from '../../lib/api';
 import {
   ShieldCheckIcon, UserPlusIcon, CalendarDaysIcon, CurrencyRupeeIcon,
   ClipboardDocumentListIcon, Cog6ToothIcon, PlusCircleIcon, TrashIcon,
   MagnifyingGlassIcon, LockOpenIcon, LockClosedIcon, 
-  PencilSquareIcon, DevicePhoneMobileIcon, MapPinIcon
+  PencilSquareIcon, DevicePhoneMobileIcon, MapPinIcon,
+  ChevronDownIcon, UserIcon, XMarkIcon
 } from '@heroicons/react/24/outline';
 
 type ViewMode = 'manage' | 'payroll' | 'audit' | 'settings';
@@ -56,13 +59,28 @@ export default function AdminDashboard() {
   const [newEmpJoinDate, setNewEmpJoinDate] = useState('');
   const [isCreatingEmp, setIsCreatingEmp] = useState(false);
 
+  // Employee Dropdown & Edit State
+  const [empFilter, setEmpFilter] = useState('');
+  const [selectedEmpId, setSelectedEmpId] = useState<string | null>(null);
+  const [showEmpList, setShowEmpList] = useState(false);
+  const empDropdownRef = useRef<HTMLDivElement>(null);
+  
+  const [isEditingEmp, setIsEditingEmp] = useState(false);
+  const [editEmpForm, setEditEmpForm] = useState({
+    name: '',
+    email: '',
+    salary: '',
+    joinDate: '',
+    isActive: true
+  });
+
   const [newHolidayDate, setNewHolidayDate] = useState('');
   const [newHolidayName, setNewHolidayName] = useState('');
   const [newHolidayDesc, setNewHolidayDesc] = useState('');
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [employees, setEmployees] = useState<any[]>([]);
 
-  // Office Location State (NEW)
+  // Office Location State
   const [officeName, setOfficeName] = useState('');
   const [officeLat, setOfficeLat] = useState('');
   const [officeLng, setOfficeLng] = useState('');
@@ -96,6 +114,25 @@ export default function AdminDashboard() {
   const [passwordMsg, setPasswordMsg] = useState('');
 
   useEffect(() => {
+    const savedTab = localStorage.getItem('adminViewMode');
+    if (savedTab) {
+      setViewMode(savedTab as ViewMode);
+    }
+    
+    const handleClickOutside = (event: MouseEvent) => {
+      if (empDropdownRef.current && !empDropdownRef.current.contains(event.target as Node)) {
+        setShowEmpList(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const changeTab = (mode: ViewMode) => {
+    setViewMode(mode);
+    localStorage.setItem('adminViewMode', mode);
+  };
+  useEffect(() => {
     checkAdminSession();
   }, []);
 
@@ -104,7 +141,6 @@ export default function AdminDashboard() {
       fetchHolidays();
       fetchEmployees();
     } else if (viewMode === 'payroll') {
-      // Set default month to current
       const now = new Date();
       const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
       setSelectedMonth(currentMonth);
@@ -116,12 +152,10 @@ export default function AdminDashboard() {
   const checkAdminSession = async () => {
     try {
       const activeUser = await getCurrentUser();
-
       if (!activeUser) {
         router.push('/');
         return;
       }
-
       setUser(activeUser);
     } catch (error) {
       console.error('Admin session check failed:', error);
@@ -130,10 +164,6 @@ export default function AdminDashboard() {
       setLoading(false);
     }
   };
-
-  // ============================================
-  // MANAGE TAB FUNCTIONS
-  // ============================================
 
   const handleCreateEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -155,6 +185,7 @@ export default function AdminDashboard() {
         setNewEmpPassword('');
         setNewEmpSalary('8000');
         setNewEmpJoinDate('');
+        fetchEmployees(); 
       } else {
         alert(`❌ ${result.message}`);
       }
@@ -162,6 +193,42 @@ export default function AdminDashboard() {
       alert(`Error: ${error.message}`);
     } finally {
       setIsCreatingEmp(false);
+    }
+  };
+
+  const startEditing = (emp: any) => {
+    setEditEmpForm({
+      name: emp.name,
+      email: emp.email,
+      salary: emp.salaryMonthly.toString(),
+      joinDate: emp.joinDate ? emp.joinDate.split('T')[0] : '',
+      isActive: emp.isActive
+    });
+    setIsEditingEmp(true);
+  };
+
+  const handleSubmitUpdateEmployee = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedEmpId) return;
+
+    try {
+      const result = await updateEmployee(selectedEmpId, {
+          name: editEmpForm.name,
+          email: editEmpForm.email,
+          salary: parseFloat(editEmpForm.salary),
+          joinDate: editEmpForm.joinDate,
+          isActive: editEmpForm.isActive
+      });
+
+      if (result.success) {
+          alert('✅ Employee updated successfully!');
+          setIsEditingEmp(false);
+          fetchEmployees(); // Refresh list to show new data
+      } else {
+          alert(`❌ ${result.message}`);
+      }
+    } catch (error: any) {
+      alert(`Error: ${error.message}`);
     }
   };
 
@@ -178,10 +245,8 @@ export default function AdminDashboard() {
 
   const handleAddHoliday = async (e: React.FormEvent) => {
     e.preventDefault();
-
     try {
       const result = await createHoliday(newHolidayDate, newHolidayName, newHolidayDesc);
-
       if (result.success) {
         alert(`✅ ${result.message}`);
         setNewHolidayDate('');
@@ -198,10 +263,8 @@ export default function AdminDashboard() {
 
   const handleDeleteHoliday = async (holidayId: string, holidayName: string) => {
     if (!confirm(`Delete holiday: ${holidayName}?`)) return;
-
     try {
       const result = await deleteHoliday(holidayId);
-
       if (result.success) {
         alert(`✅ ${result.message}`);
         await fetchHolidays();
@@ -212,13 +275,13 @@ export default function AdminDashboard() {
       alert(`Error: ${error.message}`);
     }
   };
+
   const handleAddOffice = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!officeLat || !officeLng) {
       alert("Latitude and Longitude are required");
       return;
     }
-
     try {
       const result = await addOfficeLocation(
         officeName, 
@@ -226,7 +289,6 @@ export default function AdminDashboard() {
         parseFloat(officeLng), 
         parseInt(officeRadius)
       );
-
       if (result.success) {
         alert('✅ Office Location Added! Employees can now check in here.');
         setOfficeName('');
@@ -265,23 +327,22 @@ export default function AdminDashboard() {
     }
   };
 
-  // ============================================
-  // PAYROLL TAB FUNCTIONS
-  // ============================================
+  const filteredEmployees = employees.filter(emp => 
+    emp.name.toLowerCase().includes(empFilter.toLowerCase()) || 
+    emp.email.toLowerCase().includes(empFilter.toLowerCase())
+  );
+
+  const selectedEmployee = employees.find(e => e.$id === selectedEmpId);
 
   const handleGeneratePayroll = async () => {
     if (!selectedMonth) {
       alert('Please select a month');
       return;
     }
-
     if (!confirm(`Generate payroll for ${selectedMonth}?`)) return;
-
     setIsGeneratingPayroll(true);
-
     try {
       const result = await generatePayroll(selectedMonth);
-
       if (result.success) {
         alert(`✅ ${result.message}`);
         await fetchPayrollReport();
@@ -300,19 +361,14 @@ export default function AdminDashboard() {
       alert('Please select a month');
       return;
     }
-
     if (!unlockReason.trim()) {
       alert('Please provide a reason for unlocking payroll');
       return;
     }
-
     if (!confirm(`Unlock payroll for ${selectedMonth}?`)) return;
-
     setIsUnlockingPayroll(true);
-
     try {
       const result = await unlockPayroll(selectedMonth, unlockReason);
-
       if (result.success) {
         alert(`✅ ${result.message}`);
         setUnlockReason('');
@@ -327,12 +383,34 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleResetPayroll = async () => {
+    if (!selectedMonth) return;
+    const confirmReset = prompt(
+      `⚠️ WARNING: This will DELETE all payroll and attendance calculations for ${selectedMonth}.\n\n` +
+      `This is required if you added new employees and want to include them.\n\n` +
+      `Type "DELETE" to confirm:`
+    );
+    if (confirmReset !== "DELETE") return;
+    const reason = prompt("Reason for resetting (required):");
+    if (!reason) return;
+    try {
+      const result = await deletePayroll(selectedMonth, reason);
+      if (result.success) {
+        alert(`Payroll reset successfully. You can now Generate it again.`);
+        setPayrollReports([]);
+        await fetchPayrollReport();
+      } else {
+        alert(`${result.message}`);
+      }
+    } catch (error: any) {
+      alert(`Error: ${error.message}`);
+    }
+  };
+
   const fetchPayrollReport = async () => {
     if (!selectedMonth) return;
-
     try {
       const result = await getPayrollReport(selectedMonth);
-
       if (result.success && result.data) {
         setPayrollReports(result.data.reports);
       }
@@ -343,10 +421,8 @@ export default function AdminDashboard() {
 
   const handleResetDevice = async (employeeId: string, employeeName: string) => {
     if (!confirm(`Reset device binding for ${employeeName}? They will need to re-register their device.`)) return;
-    
     const reason = prompt("Enter reason for reset (required):");
     if (!reason) return;
-
     try {
       const result = await resetEmployeeDevice(employeeId, reason);
       if (result.success) {
@@ -376,20 +452,18 @@ export default function AdminDashboard() {
         alert("Reason is required");
         return;
     }
-
     try {
       const modifications: any = {};
-      
+      const baseDate = editingAttendance.date;
       if (editCheckIn) {
-        modifications.checkInTime = `${editingAttendance.date}T${editCheckIn}:00.000Z`;
+         const localDate = new Date(`${baseDate}T${editCheckIn}`);
+         modifications.checkInTime = localDate.toISOString(); 
       }
-      
       if (editCheckOut) {
-        modifications.checkOutTime = `${editingAttendance.date}T${editCheckOut}:00.000Z`;
+         const localDate = new Date(`${baseDate}T${editCheckOut}`);
+         modifications.checkOutTime = localDate.toISOString();
       }
-
       const result = await modifyAttendance(editingAttendance.id, editReason, modifications);
-      
       if (result.success) {
         alert('✅ Attendance updated!');
         setEditingAttendance(null);
@@ -408,21 +482,14 @@ export default function AdminDashboard() {
     }
   }, [selectedMonth]);
 
-  // ============================================
-  // AUDIT TAB FUNCTIONS
-  // ============================================
-
   const fetchAuditLogs = async (page: number, filter?: string) => {
     try {
       const offset = (page - 1) * AUDIT_LIMIT;
       const filters: any = {};
-
       if (filter) {
         filters.action = filter;
       }
-
       const result = await getAuditLogs(filters, AUDIT_LIMIT, offset);
-
       if (result.success && result.data) {
         setAuditLogs(result.data.logs);
         setAuditTotal(result.data.total);
@@ -438,22 +505,15 @@ export default function AdminDashboard() {
     fetchAuditLogs(1, filter);
   };
 
-  // ============================================
-  // SETTINGS TAB FUNCTIONS
-  // ============================================
-
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordMsg('Updating...');
-
     try {
       const result = await apiChangePassword(oldPassword, newPassword);
-
       if (result.success) {
         setPasswordMsg('✅ Password changed successfully!');
         setOldPassword('');
         setNewPassword('');
-
         setTimeout(() => {
           setPasswordMsg('');
         }, 3000);
@@ -469,10 +529,6 @@ export default function AdminDashboard() {
     await apiLogout();
     router.push('/');
   };
-
-  // ============================================
-  // UTILITY FUNCTIONS
-  // ============================================
 
   const formatDateTime = (isoString: string) => {
     const date = new Date(isoString);
@@ -526,7 +582,7 @@ export default function AdminDashboard() {
           ].map(tab => (
             <button
               key={tab.id}
-              onClick={() => setViewMode(tab.id)}
+              onClick={() => changeTab(tab.id)}
               className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 transition whitespace-nowrap ${
                 viewMode === tab.id
                   ? 'border-cyan-400 text-cyan-400'
@@ -545,7 +601,205 @@ export default function AdminDashboard() {
         {/* MANAGE TAB */}
         {viewMode === 'manage' && (
           <div className="space-y-6">
-            {/* Create Employee */}
+            
+            {/* EMPLOYEE FINDER & DETAILS SECTION */}
+            <div className="bg-slate-800 rounded-lg p-6 border border-slate-700 space-y-4">
+              <h2 className="text-lg font-bold text-cyan-400 flex items-center gap-2">
+                <ClipboardDocumentListIcon className="w-6 h-6" />
+                Find Employee
+              </h2>
+
+              {/* Searchable Dropdown Container */}
+              <div className="relative" ref={empDropdownRef}>
+                <div className="flex items-center gap-2 bg-slate-700 border border-slate-600 rounded-lg p-2 focus-within:ring-2 focus-within:ring-cyan-400">
+                  <MagnifyingGlassIcon className="w-5 h-5 text-slate-400 ml-2" />
+                  <input
+                    type="text"
+                    placeholder="Search employee by name or email..."
+                    className="flex-1 bg-transparent border-none focus:ring-0 text-white placeholder-slate-400 outline-none h-8"
+                    value={empFilter}
+                    onChange={(e) => {
+                      setEmpFilter(e.target.value);
+                      setShowEmpList(true);
+                      if (!e.target.value) setSelectedEmpId(null);
+                    }}
+                    onFocus={() => setShowEmpList(true)}
+                  />
+                  {selectedEmpId ? (
+                    <button 
+                       onClick={() => { setSelectedEmpId(null); setEmpFilter(''); setIsEditingEmp(false); }}
+                       className="text-slate-400 hover:text-white"
+                    >
+                      <XMarkIcon className="w-5 h-5" />
+                    </button>
+                  ) : (
+                    <ChevronDownIcon className="w-5 h-5 text-slate-400 mr-2" />
+                  )}
+                </div>
+
+                {/* Dropdown List */}
+                {showEmpList && (
+                  <div className="absolute z-50 w-full mt-2 bg-slate-800 border border-slate-600 rounded-lg shadow-xl max-h-60 overflow-y-auto">
+                    {filteredEmployees.length === 0 ? (
+                      <div className="p-4 text-center text-slate-500 text-sm">No matches found</div>
+                    ) : (
+                      filteredEmployees.map(emp => (
+                        <div
+                          key={emp.$id}
+                          className="px-4 py-3 hover:bg-slate-700 cursor-pointer border-b border-slate-700 last:border-0 transition"
+                          onClick={() => {
+                            setSelectedEmpId(emp.$id);
+                            setEmpFilter(emp.name);
+                            setShowEmpList(false);
+                            setIsEditingEmp(false);
+                          }}
+                        >
+                          <p className="font-bold text-white">{emp.name}</p>
+                          <p className="text-xs text-slate-400">{emp.email}</p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Selected Employee Details Card OR Edit Form */}
+              {selectedEmployee && (
+                <div className="mt-6 bg-slate-750 border border-slate-600 rounded-lg p-6 animate-fade-in relative">
+                  
+                  {!isEditingEmp ? (
+                    // === VIEW MODE ===
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-4">
+                        <div className={`w-16 h-16 rounded-full flex items-center justify-center border ${
+                          selectedEmployee.isActive ? 'bg-cyan-900/50 text-cyan-400 border-cyan-800' : 'bg-red-900/50 text-red-400 border-red-800'
+                        }`}>
+                          <UserIcon className="w-8 h-8" />
+                        </div>
+                        <div>
+                          <h3 className="text-2xl font-bold text-white">{selectedEmployee.name}</h3>
+                          <p className="text-slate-400">{selectedEmployee.email}</p>
+                          <div className="flex gap-2 mt-2">
+                             <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                                selectedEmployee.isActive 
+                                  ? 'bg-green-900/50 text-green-400 border border-green-800' 
+                                  : 'bg-red-900/50 text-red-400 border border-red-800'
+                              }`}>
+                                {selectedEmployee.isActive ? 'Active' : 'Inactive'}
+                              </span>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="text-right space-y-1">
+                        <p className="text-xs text-slate-400 uppercase font-bold">Monthly Salary</p>
+                        <p className="text-2xl font-mono text-cyan-400">₹{selectedEmployee.salaryMonthly?.toLocaleString()}</p>
+                        <p className="text-xs text-slate-500 pt-2">Joined: {new Date(selectedEmployee.joinDate).toLocaleDateString()}</p>
+                        
+                        {/* Edit Button */}
+                        <button 
+                          onClick={() => startEditing(selectedEmployee)}
+                          className="mt-4 flex items-center gap-2 text-sm font-bold text-cyan-400 hover:text-cyan-300 bg-slate-800 px-3 py-2 rounded border border-slate-600 hover:border-cyan-400 transition ml-auto"
+                        >
+                          <PencilSquareIcon className="w-4 h-4" /> Edit Profile
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    // === EDIT MODE ===
+                    <form onSubmit={handleSubmitUpdateEmployee} className="space-y-4">
+                      <div className="flex items-center justify-between mb-4 border-b border-slate-600 pb-2">
+                        <h3 className="font-bold text-white flex items-center gap-2">
+                          <PencilSquareIcon className="w-5 h-5 text-cyan-400" />
+                          Edit Employee
+                        </h3>
+                        <button 
+                           type="button" 
+                           onClick={() => setIsEditingEmp(false)}
+                           className="text-slate-400 hover:text-white"
+                        >
+                           <XMarkIcon className="w-6 h-6" />
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                         <div>
+                            <label className="text-xs font-bold text-slate-400 uppercase">Full Name</label>
+                            <input 
+                              type="text" 
+                              value={editEmpForm.name}
+                              onChange={e => setEditEmpForm({...editEmpForm, name: e.target.value})}
+                              className="w-full mt-1 p-2 bg-slate-900 border border-slate-600 rounded text-white"
+                            />
+                         </div>
+                         <div>
+                            <label className="text-xs font-bold text-slate-400 uppercase">Email</label>
+                            <input 
+                              type="email" 
+                              value={editEmpForm.email}
+                              onChange={e => setEditEmpForm({...editEmpForm, email: e.target.value})}
+                              className="w-full mt-1 p-2 bg-slate-900 border border-slate-600 rounded text-white"
+                            />
+                         </div>
+                         <div>
+                            <label className="text-xs font-bold text-slate-400 uppercase">Monthly Salary (₹)</label>
+                            <input 
+                              type="number" 
+                              value={editEmpForm.salary}
+                              onChange={e => setEditEmpForm({...editEmpForm, salary: e.target.value})}
+                              className="w-full mt-1 p-2 bg-slate-900 border border-slate-600 rounded text-white font-mono text-cyan-400"
+                            />
+                         </div>
+                         <div>
+                            <label className="text-xs font-bold text-slate-400 uppercase">Join Date</label>
+                            <input 
+                              type="date" 
+                              value={editEmpForm.joinDate}
+                              onChange={e => setEditEmpForm({...editEmpForm, joinDate: e.target.value})}
+                              className="w-full mt-1 p-2 bg-slate-900 border border-slate-600 rounded text-white"
+                            />
+                         </div>
+                      </div>
+
+                      <div className="pt-2">
+                         <label className="flex items-center gap-2 cursor-pointer group">
+                            <div className={`w-10 h-6 rounded-full p-1 transition-colors ${editEmpForm.isActive ? 'bg-green-600' : 'bg-slate-600'}`}>
+                               <div className={`w-4 h-4 bg-white rounded-full shadow-md transform transition-transform ${editEmpForm.isActive ? 'translate-x-4' : 'translate-x-0'}`} />
+                            </div>
+                            <input 
+                               type="checkbox" 
+                               className="hidden" 
+                               checked={editEmpForm.isActive} 
+                               onChange={e => setEditEmpForm({...editEmpForm, isActive: e.target.checked})} 
+                            />
+                            <span className="text-sm font-bold text-slate-300 group-hover:text-white">
+                               {editEmpForm.isActive ? 'Account is Active' : 'Account is Inactive (Cannot Login)'}
+                            </span>
+                         </label>
+                      </div>
+
+                      <div className="flex gap-3 pt-2">
+                         <button 
+                           type="submit" 
+                           className="flex-1 bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 rounded transition"
+                         >
+                            Save Changes
+                         </button>
+                         <button 
+                           type="button" 
+                           onClick={() => setIsEditingEmp(false)} 
+                           className="px-6 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-2 rounded transition border border-slate-600"
+                         >
+                            Cancel
+                         </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Create Employee (Collapsed/Compact version could be nice, but keeping full for now) */}
             <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
               <h2 className="text-lg font-bold text-cyan-400 mb-4 flex items-center gap-2">
                 <UserPlusIcon className="w-6 h-6" />
@@ -602,56 +856,7 @@ export default function AdminDashboard() {
               </form>
             </div>
 
-            {/* EMPLOYEE LIST SECTION */}
-            <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
-              <h2 className="text-lg font-bold text-cyan-400 mb-4 flex items-center gap-2">
-                <ClipboardDocumentListIcon className="w-6 h-6" />
-                All Employees ({employees.length})
-              </h2>
-              
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm text-slate-400">
-                  <thead className="bg-slate-700 text-xs uppercase font-bold text-slate-300">
-                    <tr>
-                      <th className="px-4 py-3">Name</th>
-                      <th className="px-4 py-3">Email</th>
-                      <th className="px-4 py-3">Salary</th>
-                      <th className="px-4 py-3">Join Date</th>
-                      <th className="px-4 py-3">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-700">
-                    {employees.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="px-4 py-8 text-center text-slate-500 italic">
-                          No employees found. Add one above.
-                        </td>
-                      </tr>
-                    ) : (
-                      employees.map((emp) => (
-                        <tr key={emp.$id} className="hover:bg-slate-750 transition">
-                          <td className="px-4 py-3 font-bold text-white">{emp.name}</td>
-                          <td className="px-4 py-3">{emp.email}</td>
-                          <td className="px-4 py-3 text-cyan-400 font-mono">₹{emp.salaryMonthly?.toLocaleString()}</td>
-                          <td className="px-4 py-3">{new Date(emp.joinDate).toLocaleDateString()}</td>
-                          <td className="px-4 py-3">
-                            <span className={`px-2 py-1 rounded-full text-xs font-bold ${
-                              emp.isActive 
-                                ? 'bg-green-900/50 text-green-400 border border-green-800' 
-                                : 'bg-red-900/50 text-red-400 border border-red-800'
-                            }`}>
-                              {emp.isActive ? 'Active' : 'Inactive'}
-                            </span>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Office Locations Management (ADDED) */}
+            {/* Office Locations Management */}
             <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
               <h2 className="text-lg font-bold text-cyan-400 mb-4 flex items-center gap-2">
                 <MapPinIcon className="w-6 h-6" />
@@ -807,26 +1012,51 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              {payrollReports.length > 0 && payrollReports[0]?.isLocked && (
-                <div className="mt-4 pt-4 border-t border-slate-700">
-                  <h3 className="text-sm font-bold text-amber-400 mb-3">Unlock Payroll</h3>
-                  <div className="flex gap-3">
-                    <input
-                      type="text"
-                      placeholder="Reason for unlocking (required)"
-                      value={unlockReason}
-                      onChange={e => setUnlockReason(e.target.value)}
-                      className="flex-1 p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-amber-400"
-                    />
-                    <button
-                      onClick={handleUnlockPayroll}
-                      disabled={isUnlockingPayroll || !unlockReason.trim()}
-                      className="bg-amber-600 hover:bg-amber-700 px-6 py-3 rounded-lg font-bold transition disabled:opacity-50 flex items-center gap-2"
-                    >
-                      <LockOpenIcon className="w-5 h-5" />
-                      {isUnlockingPayroll ? 'Unlocking...' : 'Unlock'}
-                    </button>
+              {/* Payroll Actions: Unlock & Reset */}
+              {payrollReports.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-slate-700 space-y-4">
+                  
+                  {/* UNLOCK SECTION (Only if Locked) */}
+                  {payrollReports[0]?.isLocked && (
+                    <div>
+                      <h3 className="text-sm font-bold text-amber-400 mb-2">Unlock for Editing</h3>
+                      <div className="flex gap-3">
+                        <input 
+                          type="text" 
+                          placeholder="Reason (required)" 
+                          value={unlockReason} 
+                          onChange={e => setUnlockReason(e.target.value)} 
+                          className="flex-1 p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-amber-400" 
+                        />
+                        <button 
+                          onClick={handleUnlockPayroll} 
+                          disabled={isUnlockingPayroll || !unlockReason.trim()} 
+                          className="bg-amber-600 hover:bg-amber-700 px-6 py-3 rounded-lg font-bold transition disabled:opacity-50 flex items-center gap-2"
+                        >
+                          <LockOpenIcon className="w-5 h-5" /> 
+                          {isUnlockingPayroll ? 'Unlocking...' : 'Unlock'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* RESET SECTION (Always visible if payroll exists) */}
+                  <div>
+                    <h3 className="text-sm font-bold text-red-400 mb-2">Danger Zone</h3>
+                    <div className="flex items-center justify-between bg-red-900/20 p-3 rounded-lg border border-red-900/50">
+                      <p className="text-sm text-red-200">
+                        Missing an employee? Resetting will delete this report and allow you to Regenerate.
+                      </p>
+                      <button 
+                        onClick={handleResetPayroll}
+                        className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded font-bold text-sm transition flex items-center gap-2"
+                      >
+                        <TrashIcon className="w-4 h-4" />
+                        Reset Payroll
+                      </button>
+                    </div>
                   </div>
+
                 </div>
               )}
             </div>
@@ -1078,7 +1308,9 @@ export default function AdminDashboard() {
               <h3 className="text-xl font-bold text-white mb-4">Edit Attendance ({editingAttendance.date})</h3>
               <form onSubmit={handleSubmitEdit} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1">New Check-In (HH:MM)</label>
+                  <label className="block text-xs font-bold text-slate-400 mb-1">
+                    New Check-In <span className="text-cyan-600">(24-hour format, e.g., 13:00)</span>
+                  </label>
                   <input 
                     type="time" 
                     value={editCheckIn} 
