@@ -13,23 +13,51 @@ import {
   createHoliday,
   deleteHoliday,
   getHolidays,
-  getAuditLogs,
   modifyAttendance,
   resetEmployeeDevice,
   addOfficeLocation,
   getEmployees,
-  deletePayroll
+  deletePayroll,
+  getAllAttendance
 } from '../../lib/api';
-import type { User, PayrollRecord, Holiday, AuditLog } from '../../lib/api';
+import type { User, PayrollRecord, Holiday, AttendanceSheetDay, AttendanceSheetSummary, AttendanceSheetEmployee } from '../../lib/api';
 import {
   ShieldCheckIcon, UserPlusIcon, CalendarDaysIcon, CurrencyRupeeIcon,
   ClipboardDocumentListIcon, Cog6ToothIcon, PlusCircleIcon, TrashIcon,
-  MagnifyingGlassIcon, LockOpenIcon, LockClosedIcon, 
+  LockOpenIcon, LockClosedIcon, MagnifyingGlassIcon,
   PencilSquareIcon, DevicePhoneMobileIcon, MapPinIcon,
-  ChevronDownIcon, UserIcon, XMarkIcon
+  ChevronDownIcon, UserIcon, XMarkIcon, ChevronLeftIcon, ChevronRightIcon,
+  CheckCircleIcon, XCircleIcon, ClockIcon, ArrowPathIcon
 } from '@heroicons/react/24/outline';
 
-type ViewMode = 'manage' | 'payroll' | 'audit' | 'settings';
+type ViewMode = 'manage' | 'attendance' | 'payroll' | 'settings';
+
+interface Employee {
+  $id: string;
+  name: string;
+  email: string;
+  salaryMonthly: number;
+  joinDate: string;
+  isActive: boolean;
+}
+
+interface EditEmployeeForm {
+  name: string;
+  email: string;
+  salary: string;
+  joinDate: string;
+  isActive: boolean;
+}
+
+interface AttendanceDay {
+  id: string;
+  date: string;
+  day: string;
+  status: string;
+  checkIn: string;
+  checkOut: string;
+  hours: number;
+}
 
 const getCurrentLocation = (): Promise<GeolocationPosition> => {
   return new Promise((resolve, reject) => {
@@ -45,11 +73,715 @@ const getCurrentLocation = (): Promise<GeolocationPosition> => {
   });
 };
 
-export default function AdminDashboard() {
+// Custom Hooks
+const useAdminAuth = () => {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState<ViewMode>('manage');
+
+  useEffect(() => {
+    const checkSession = async () => {
+      try {
+        const activeUser = await getCurrentUser();
+        if (!activeUser) {
+          router.push('/');
+          return;
+        }
+        setUser(activeUser);
+      } catch (error) {
+        console.error('Admin session check failed:', error);
+        router.push('/');
+      } finally {
+        setLoading(false);
+      }
+    };
+    checkSession();
+  }, [router]);
+
+  const handleLogout = async () => {
+    await apiLogout();
+    router.push('/');
+  };
+
+  return { user, loading, handleLogout };
+};
+
+const useTabNavigation = () => {
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    if (typeof window !== 'undefined') {
+      const savedTab = localStorage.getItem('adminViewMode');
+      return (savedTab as ViewMode) || 'manage';
+    }
+    return 'manage';
+  });
+
+  const changeTab = (mode: ViewMode) => {
+    setViewMode(mode);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('adminViewMode', mode);
+    }
+  };
+
+  return { viewMode, changeTab };
+};
+
+const useEmployeeManagement = () => {
+  const [employees, setEmployees] = useState<Employee[]>([]);
+
+  const fetchEmployees = async () => {
+    try {
+      const result = await getEmployees();
+      if (result.success && result.data) {
+        setEmployees(result.data.employees);
+      }
+    } catch (error) {
+      console.error('Failed to fetch employees:', error);
+    }
+  };
+
+  return { employees, fetchEmployees };
+};
+
+const useHolidayManagement = () => {
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
+
+  const fetchHolidays = async () => {
+    try {
+      const result = await getHolidays();
+      if (result.success && result.data) {
+        setHolidays(result.data.holidays);
+      }
+    } catch (error) {
+      console.error('Failed to fetch holidays:', error);
+    }
+  };
+
+  return { holidays, fetchHolidays };
+};
+
+// Components
+const Header = ({ userName, onLogout }: { userName: string; onLogout: () => void }) => (
+  <div className="bg-slate-800 border-b border-slate-700 px-4 py-4 sticky top-0 z-10">
+    <div className="max-w-7xl mx-auto flex items-center justify-between">
+      <div className="flex items-center gap-3">
+        <ShieldCheckIcon className="w-8 h-8 text-cyan-400" />
+        <div>
+          <h1 className="text-xl font-bold">Admin Dashboard</h1>
+          <p className="text-xs text-slate-400">{userName}</p>
+        </div>
+      </div>
+      <button
+        onClick={onLogout}
+        className="text-sm font-bold text-red-400 hover:text-red-500 underline decoration-2"
+      >
+        Logout
+      </button>
+    </div>
+  </div>
+);
+
+const TabNavigation = ({ viewMode, changeTab }: { viewMode: ViewMode; changeTab: (mode: ViewMode) => void }) => {
+  const tabs = [
+    { id: 'manage' as ViewMode, icon: UserPlusIcon, label: 'Manage' },
+    { id: 'attendance' as ViewMode, icon: ClipboardDocumentListIcon, label: 'Attendance' },
+    { id: 'payroll' as ViewMode, icon: CurrencyRupeeIcon, label: 'Payroll' },
+    { id: 'settings' as ViewMode, icon: Cog6ToothIcon, label: 'Settings' }
+  ];
+
+  return (
+    <div className="bg-slate-800 border-b border-slate-700 px-4">
+      <div className="max-w-7xl mx-auto flex gap-1 overflow-x-auto">
+        {tabs.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => changeTab(tab.id)}
+            className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 transition whitespace-nowrap ${
+              viewMode === tab.id
+                ? 'border-cyan-400 text-cyan-400'
+                : 'border-transparent text-slate-400 hover:text-slate-300'
+            }`}
+          >
+            <tab.icon className="w-5 h-5" />
+            {tab.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const LoadingSpinner = () => (
+  <div className="min-h-screen bg-slate-900 flex items-center justify-center">
+    <div className="text-center space-y-4">
+      <div className="w-16 h-16 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
+      <p className="text-slate-400 font-mono">Loading Admin Panel...</p>
+    </div>
+  </div>
+);
+
+const EmployeeSearchDropdown = ({
+  employees,
+  empFilter,
+  setEmpFilter,
+  selectedEmpId,
+  setSelectedEmpId,
+  showEmpList,
+  setShowEmpList,
+  setIsEditingEmp,
+  empDropdownRef
+}: {
+  employees: Employee[];
+  empFilter: string;
+  setEmpFilter: (value: string) => void;
+  selectedEmpId: string | null;
+  setSelectedEmpId: (id: string | null) => void;
+  showEmpList: boolean;
+  setShowEmpList: (show: boolean) => void;
+  setIsEditingEmp: (editing: boolean) => void;
+  empDropdownRef: React.RefObject<HTMLDivElement | null>;
+}) => {
+  const filteredEmployees = employees.filter(emp =>
+    emp.name.toLowerCase().includes(empFilter.toLowerCase()) ||
+    emp.email.toLowerCase().includes(empFilter.toLowerCase())
+  );
+
+  return (
+    <div className="relative" ref={empDropdownRef}>
+      <div className="flex items-center gap-2 bg-slate-700 border border-slate-600 rounded-lg p-2 focus-within:ring-2 focus-within:ring-cyan-400">
+        <MagnifyingGlassIcon className="w-5 h-5 text-slate-400 ml-2" />
+        <input
+          type="text"
+          placeholder="Search employee by name or email..."
+          className="flex-1 bg-transparent border-none focus:ring-0 text-white placeholder-slate-400 outline-none h-8"
+          value={empFilter}
+          onChange={(e) => {
+            setEmpFilter(e.target.value);
+            setShowEmpList(true);
+            if (!e.target.value) setSelectedEmpId(null);
+          }}
+          onFocus={() => setShowEmpList(true)}
+        />
+        {selectedEmpId ? (
+          <button
+            onClick={() => { setSelectedEmpId(null); setEmpFilter(''); setIsEditingEmp(false); }}
+            className="text-slate-400 hover:text-white"
+          >
+            <XMarkIcon className="w-5 h-5" />
+          </button>
+        ) : (
+          <ChevronDownIcon className="w-5 h-5 text-slate-400 mr-2" />
+        )}
+      </div>
+
+      {showEmpList && (
+        <div className="absolute z-50 w-full mt-2 bg-slate-800 border border-slate-600 rounded-lg shadow-xl max-h-60 overflow-y-auto">
+          {filteredEmployees.length === 0 ? (
+            <div className="p-4 text-center text-slate-500 text-sm">No matches found</div>
+          ) : (
+            filteredEmployees.map(emp => (
+              <div
+                key={emp.$id}
+                className="px-4 py-3 hover:bg-slate-700 cursor-pointer border-b border-slate-700 last:border-0 transition"
+                onClick={() => {
+                  setSelectedEmpId(emp.$id);
+                  setEmpFilter(emp.name);
+                  setShowEmpList(false);
+                  setIsEditingEmp(false);
+                }}
+              >
+                <p className="font-bold text-white">{emp.name}</p>
+                <p className="text-xs text-slate-400">{emp.email}</p>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const EmployeeDetailsView = ({ employee, onEdit }: { employee: Employee; onEdit: () => void }) => (
+  <div className="flex items-start justify-between">
+    <div className="flex items-center gap-4">
+      <div className={`w-16 h-16 rounded-full flex items-center justify-center border ${
+        employee.isActive ? 'bg-cyan-900/50 text-cyan-400 border-cyan-800' : 'bg-red-900/50 text-red-400 border-red-800'
+      }`}>
+        <UserIcon className="w-8 h-8" />
+      </div>
+      <div>
+        <h3 className="text-2xl font-bold text-white">{employee.name}</h3>
+        <p className="text-slate-400">{employee.email}</p>
+        <div className="flex gap-2 mt-2">
+          <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+            employee.isActive
+              ? 'bg-green-900/50 text-green-400 border border-green-800'
+              : 'bg-red-900/50 text-red-400 border border-red-800'
+          }`}>
+            {employee.isActive ? 'Active' : 'Inactive'}
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div className="text-right space-y-1">
+      <p className="text-xs text-slate-400 uppercase font-bold">Monthly Salary</p>
+      <p className="text-2xl font-mono text-cyan-400">₹{employee.salaryMonthly?.toLocaleString()}</p>
+      <p className="text-xs text-slate-500 pt-2">Joined: {new Date(employee.joinDate).toLocaleDateString()}</p>
+
+      <button
+        onClick={onEdit}
+        className="mt-4 flex items-center gap-2 text-sm font-bold text-cyan-400 hover:text-cyan-300 bg-slate-800 px-3 py-2 rounded border border-slate-600 hover:border-cyan-400 transition ml-auto"
+      >
+        <PencilSquareIcon className="w-4 h-4" /> Edit Profile
+      </button>
+    </div>
+  </div>
+);
+
+const EmployeeEditForm = ({
+  editEmpForm,
+  setEditEmpForm,
+  onSubmit,
+  onCancel
+}: {
+  editEmpForm: EditEmployeeForm;
+  setEditEmpForm: React.Dispatch<React.SetStateAction<EditEmployeeForm>>;
+  onSubmit: (e: React.FormEvent) => Promise<void>;
+  onCancel: () => void;
+}) => (
+  <form onSubmit={onSubmit} className="space-y-4">
+    <div className="flex items-center justify-between mb-4 border-b border-slate-600 pb-2">
+      <h3 className="font-bold text-white flex items-center gap-2">
+        <PencilSquareIcon className="w-5 h-5 text-cyan-400" />
+        Edit Employee
+      </h3>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="text-slate-400 hover:text-white"
+      >
+        <XMarkIcon className="w-6 h-6" />
+      </button>
+    </div>
+
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div>
+        <label className="text-xs font-bold text-slate-400 uppercase">Full Name</label>
+        <input
+          type="text"
+          value={editEmpForm.name}
+          onChange={e => setEditEmpForm({...editEmpForm, name: e.target.value})}
+          className="w-full mt-1 p-2 bg-slate-900 border border-slate-600 rounded text-white"
+        />
+      </div>
+      <div>
+        <label className="text-xs font-bold text-slate-400 uppercase">Email</label>
+        <input
+          type="email"
+          value={editEmpForm.email}
+          onChange={e => setEditEmpForm({...editEmpForm, email: e.target.value})}
+          className="w-full mt-1 p-2 bg-slate-900 border border-slate-600 rounded text-white"
+        />
+      </div>
+      <div>
+        <label className="text-xs font-bold text-slate-400 uppercase">Monthly Salary (₹)</label>
+        <input
+          type="number"
+          value={editEmpForm.salary}
+          onChange={e => setEditEmpForm({...editEmpForm, salary: e.target.value})}
+          className="w-full mt-1 p-2 bg-slate-900 border border-slate-600 rounded text-white font-mono text-cyan-400"
+        />
+      </div>
+      <div>
+        <label className="text-xs font-bold text-slate-400 uppercase">Join Date</label>
+        <input
+          type="date"
+          value={editEmpForm.joinDate}
+          onChange={e => setEditEmpForm({...editEmpForm, joinDate: e.target.value})}
+          className="w-full mt-1 p-2 bg-slate-900 border border-slate-600 rounded text-white"
+        />
+      </div>
+    </div>
+
+    <div className="pt-2">
+      <label className="flex items-center gap-2 cursor-pointer group">
+        <div className={`w-10 h-6 rounded-full p-1 transition-colors ${editEmpForm.isActive ? 'bg-green-600' : 'bg-slate-600'}`}>
+          <div className={`w-4 h-4 bg-white rounded-full shadow-md transform transition-transform ${editEmpForm.isActive ? 'translate-x-4' : 'translate-x-0'}`} />
+        </div>
+        <input
+          type="checkbox"
+          className="hidden"
+          checked={editEmpForm.isActive}
+          onChange={e => setEditEmpForm({...editEmpForm, isActive: e.target.checked})}
+        />
+        <span className="text-sm font-bold text-slate-300 group-hover:text-white">
+          {editEmpForm.isActive ? 'Account is Active' : 'Account is Inactive (Cannot Login)'}
+        </span>
+      </label>
+    </div>
+
+    <div className="flex gap-3 pt-2">
+      <button
+        type="submit"
+        className="flex-1 bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 rounded transition"
+      >
+        Save Changes
+      </button>
+      <button
+        type="button"
+        onClick={onCancel}
+        className="px-6 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-2 rounded transition border border-slate-600"
+      >
+        Cancel
+      </button>
+    </div>
+  </form>
+);
+
+const CreateEmployeeForm = ({
+  newEmpName,
+  setNewEmpName,
+  newEmpEmail,
+  setNewEmpEmail,
+  newEmpPassword,
+  setNewEmpPassword,
+  newEmpSalary,
+  setNewEmpSalary,
+  newEmpJoinDate,
+  setNewEmpJoinDate,
+  isCreatingEmp,
+  onSubmit
+}: {
+  newEmpName: string;
+  setNewEmpName: (value: string) => void;
+  newEmpEmail: string;
+  setNewEmpEmail: (value: string) => void;
+  newEmpPassword: string;
+  setNewEmpPassword: (value: string) => void;
+  newEmpSalary: string;
+  setNewEmpSalary: (value: string) => void;
+  newEmpJoinDate: string;
+  setNewEmpJoinDate: (value: string) => void;
+  isCreatingEmp: boolean;
+  onSubmit: (e: React.FormEvent) => void;
+}) => (
+  <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
+    <h2 className="text-lg font-bold text-cyan-400 mb-4 flex items-center gap-2">
+      <UserPlusIcon className="w-6 h-6" />
+      Create New Employee
+    </h2>
+    <form onSubmit={onSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <input
+        type="text"
+        placeholder="Full Name"
+        value={newEmpName}
+        onChange={e => setNewEmpName(e.target.value)}
+        className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+        required
+      />
+      <input
+        type="email"
+        placeholder="Email"
+        value={newEmpEmail}
+        onChange={e => setNewEmpEmail(e.target.value)}
+        className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+        required
+      />
+      <input
+        type="password"
+        placeholder="Password"
+        value={newEmpPassword}
+        onChange={e => setNewEmpPassword(e.target.value)}
+        className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+        required
+      />
+      <input
+        type="number"
+        placeholder="Monthly Salary"
+        value={newEmpSalary}
+        onChange={e => setNewEmpSalary(e.target.value)}
+        className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+        required
+      />
+      <input
+        type="date"
+        placeholder="Join Date"
+        value={newEmpJoinDate}
+        onChange={e => setNewEmpJoinDate(e.target.value)}
+        className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+        required
+      />
+      <button
+        type="submit"
+        disabled={isCreatingEmp}
+        className="bg-cyan-600 hover:bg-cyan-700 px-6 py-3 rounded-lg font-bold transition disabled:opacity-50"
+      >
+        {isCreatingEmp ? 'Creating...' : 'Create Employee'}
+      </button>
+    </form>
+  </div>
+);
+
+const OfficeLocationForm = ({
+  officeName,
+  setOfficeName,
+  officeLat,
+  setOfficeLat,
+  officeLng,
+  setOfficeLng,
+  officeRadius,
+  setOfficeRadius,
+  isGettingLoc,
+  onGetLocation,
+  onSubmit
+}: {
+  officeName: string;
+  setOfficeName: (value: string) => void;
+  officeLat: string;
+  setOfficeLat: (value: string) => void;
+  officeLng: string;
+  setOfficeLng: (value: string) => void;
+  officeRadius: string;
+  setOfficeRadius: (value: string) => void;
+  isGettingLoc: boolean;
+  onGetLocation: () => void;
+  onSubmit: (e: React.FormEvent) => void;
+}) => (
+  <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
+    <h2 className="text-lg font-bold text-cyan-400 mb-4 flex items-center gap-2">
+      <MapPinIcon className="w-6 h-6" />
+      Office Locations
+    </h2>
+
+    <form onSubmit={onSubmit} className="space-y-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <input
+          type="text"
+          placeholder="Location Name (e.g. HQ)"
+          value={officeName}
+          onChange={e => setOfficeName(e.target.value)}
+          className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white"
+          required
+        />
+        <input
+          type="number"
+          placeholder="Radius (Meters)"
+          value={officeRadius}
+          onChange={e => setOfficeRadius(e.target.value)}
+          className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white"
+          required
+        />
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="flex gap-2">
+          <input
+            type="number"
+            step="any"
+            placeholder="Latitude"
+            value={officeLat}
+            onChange={e => setOfficeLat(e.target.value)}
+            className="flex-1 p-3 bg-slate-700 border border-slate-600 rounded-lg text-white"
+            required
+          />
+          <input
+            type="number"
+            step="any"
+            placeholder="Longitude"
+            value={officeLng}
+            onChange={e => setOfficeLng(e.target.value)}
+            className="flex-1 p-3 bg-slate-700 border border-slate-600 rounded-lg text-white"
+            required
+          />
+        </div>
+        <button
+          type="button"
+          onClick={onGetLocation}
+          disabled={isGettingLoc}
+          className="bg-slate-700 hover:bg-slate-600 border border-slate-600 text-cyan-400 px-4 py-3 rounded-lg font-bold transition flex items-center justify-center gap-2"
+        >
+          <MapPinIcon className="w-5 h-5" />
+          {isGettingLoc ? "Locating..." : "Get My Current Location"}
+        </button>
+      </div>
+
+      <button
+        type="submit"
+        className="w-full bg-cyan-600 hover:bg-cyan-700 px-6 py-3 rounded-lg font-bold transition"
+      >
+        Add Office Location
+      </button>
+    </form>
+  </div>
+);
+
+const HolidayManagementSection = ({
+  holidays,
+  newHolidayDate,
+  setNewHolidayDate,
+  newHolidayName,
+  setNewHolidayName,
+  newHolidayDesc,
+  setNewHolidayDesc,
+  onAddHoliday,
+  onDeleteHoliday
+}: {
+  holidays: Holiday[];
+  newHolidayDate: string;
+  setNewHolidayDate: (value: string) => void;
+  newHolidayName: string;
+  setNewHolidayName: (value: string) => void;
+  newHolidayDesc: string;
+  setNewHolidayDesc: (value: string) => void;
+  onAddHoliday: (e: React.FormEvent) => void;
+  onDeleteHoliday: (id: string, name: string) => void;
+}) => (
+  <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
+    <h2 className="text-lg font-bold text-cyan-400 mb-4 flex items-center gap-2">
+      <CalendarDaysIcon className="w-6 h-6" />
+      Holiday Management
+    </h2>
+
+    <form onSubmit={onAddHoliday} className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+      <input
+        type="date"
+        value={newHolidayDate}
+        onChange={e => setNewHolidayDate(e.target.value)}
+        className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+        required
+      />
+      <input
+        type="text"
+        placeholder="Holiday Name"
+        value={newHolidayName}
+        onChange={e => setNewHolidayName(e.target.value)}
+        className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+        required
+      />
+      <input
+        type="text"
+        placeholder="Description"
+        value={newHolidayDesc}
+        onChange={e => setNewHolidayDesc(e.target.value)}
+        className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+      />
+      <button
+        type="submit"
+        className="bg-green-600 hover:bg-green-700 px-6 py-3 rounded-lg font-bold transition flex items-center justify-center gap-2"
+      >
+        <PlusCircleIcon className="w-5 h-5" />
+        Add Holiday
+      </button>
+    </form>
+
+    <div className="space-y-2">
+      {holidays.length === 0 ? (
+        <p className="text-center text-slate-500 py-4">No holidays configured</p>
+      ) : (
+        holidays.map(holiday => (
+          <div key={holiday.$id} className="flex items-center justify-between bg-slate-700 p-3 rounded-lg">
+            <div>
+              <p className="font-bold text-white">{holiday.name}</p>
+              <p className="text-sm text-slate-400">{holiday.date} - {holiday.description}</p>
+            </div>
+            <button
+              onClick={() => onDeleteHoliday(holiday.$id, holiday.name)}
+              className="text-red-400 hover:text-red-500 p-2"
+            >
+              <TrashIcon className="w-5 h-5" />
+            </button>
+          </div>
+        ))
+      )}
+    </div>
+  </div>
+);
+
+const AttendanceEditModal = ({
+  editingAttendance,
+  editCheckIn,
+  setEditCheckIn,
+  editCheckOut,
+  setEditCheckOut,
+  editReason,
+  setEditReason,
+  onSubmit,
+  onCancel
+}: {
+  editingAttendance: AttendanceDay | null;
+  editCheckIn: string;
+  setEditCheckIn: (value: string) => void;
+  editCheckOut: string;
+  setEditCheckOut: (value: string) => void;
+  editReason: string;
+  setEditReason: (value: string) => void;
+  onSubmit: (e: React.FormEvent) => void;
+  onCancel: () => void;
+}) => {
+  if (!editingAttendance) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+      <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md border border-slate-700">
+        <h3 className="text-xl font-bold text-white mb-4">Edit Attendance ({editingAttendance.date})</h3>
+        <form onSubmit={onSubmit} className="space-y-4">
+          <div>
+            <label className="block text-xs font-bold text-slate-400 mb-1">
+              New Check-In <span className="text-cyan-600">(24-hour format, e.g., 13:00)</span>
+            </label>
+            <input
+              type="time"
+              value={editCheckIn}
+              onChange={e => setEditCheckIn(e.target.value)}
+              className="w-full p-2 bg-slate-700 border border-slate-600 rounded text-white"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-400 mb-1">New Check-Out (HH:MM)</label>
+            <input
+              type="time"
+              value={editCheckOut}
+              onChange={e => setEditCheckOut(e.target.value)}
+              className="w-full p-2 bg-slate-700 border border-slate-600 rounded text-white"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-400 mb-1">Reason (Required)</label>
+            <input
+              type="text"
+              required
+              value={editReason}
+              onChange={e => setEditReason(e.target.value)}
+              placeholder="e.g. Forgot to punch out"
+              className="w-full p-2 bg-slate-700 border border-slate-600 rounded text-white"
+            />
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="flex-1 py-2 bg-slate-700 hover:bg-slate-600 rounded font-bold transition"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="flex-1 py-2 bg-cyan-600 hover:bg-cyan-700 rounded font-bold transition"
+            >
+              Save Changes
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// Main Dashboard Component
+export default function AdminDashboard() {
+  const { user, loading, handleLogout } = useAdminAuth();
+  const { viewMode, changeTab } = useTabNavigation();
+  const { employees, fetchEmployees } = useEmployeeManagement();
+  const { holidays, fetchHolidays } = useHolidayManagement();
 
   // Manage Tab State
   const [newEmpName, setNewEmpName] = useState('');
@@ -64,9 +796,9 @@ export default function AdminDashboard() {
   const [selectedEmpId, setSelectedEmpId] = useState<string | null>(null);
   const [showEmpList, setShowEmpList] = useState(false);
   const empDropdownRef = useRef<HTMLDivElement>(null);
-  
+
   const [isEditingEmp, setIsEditingEmp] = useState(false);
-  const [editEmpForm, setEditEmpForm] = useState({
+  const [editEmpForm, setEditEmpForm] = useState<EditEmployeeForm>({
     name: '',
     email: '',
     salary: '',
@@ -77,8 +809,6 @@ export default function AdminDashboard() {
   const [newHolidayDate, setNewHolidayDate] = useState('');
   const [newHolidayName, setNewHolidayName] = useState('');
   const [newHolidayDesc, setNewHolidayDesc] = useState('');
-  const [holidays, setHolidays] = useState<Holiday[]>([]);
-  const [employees, setEmployees] = useState<any[]>([]);
 
   // Office Location State
   const [officeName, setOfficeName] = useState('');
@@ -96,17 +826,20 @@ export default function AdminDashboard() {
   const [unlockReason, setUnlockReason] = useState('');
 
   // Attendance Editing State
-  const [editingAttendance, setEditingAttendance] = useState<any>(null);
+  const [editingAttendance, setEditingAttendance] = useState<AttendanceDay | null>(null);
   const [editCheckIn, setEditCheckIn] = useState('');
   const [editCheckOut, setEditCheckOut] = useState('');
   const [editReason, setEditReason] = useState('');
 
-  // Audit Tab State
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
-  const [auditTotal, setAuditTotal] = useState(0);
-  const [auditPage, setAuditPage] = useState(1);
-  const [auditFilter, setAuditFilter] = useState('');
-  const AUDIT_LIMIT = 20;
+  // Attendance Tab State
+  const [attendanceDate, setAttendanceDate] = useState(() => {
+    const now = new Date();
+    return now.toISOString().split('T')[0];
+  });
+  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceSheetDay[]>([]);
+  const [attendanceSummary, setAttendanceSummary] = useState<AttendanceSheetSummary | null>(null);
+  const [isLoadingAttendance, setIsLoadingAttendance] = useState(false);
+  const [attendanceViewMode, setAttendanceViewMode] = useState<'day' | 'week'>('day');
 
   // Settings Tab State
   const [oldPassword, setOldPassword] = useState('');
@@ -114,11 +847,6 @@ export default function AdminDashboard() {
   const [passwordMsg, setPasswordMsg] = useState('');
 
   useEffect(() => {
-    const savedTab = localStorage.getItem('adminViewMode');
-    if (savedTab) {
-      setViewMode(savedTab as ViewMode);
-    }
-    
     const handleClickOutside = (event: MouseEvent) => {
       if (empDropdownRef.current && !empDropdownRef.current.contains(event.target as Node)) {
         setShowEmpList(false);
@@ -126,14 +854,6 @@ export default function AdminDashboard() {
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const changeTab = (mode: ViewMode) => {
-    setViewMode(mode);
-    localStorage.setItem('adminViewMode', mode);
-  };
-  useEffect(() => {
-    checkAdminSession();
   }, []);
 
   useEffect(() => {
@@ -144,26 +864,20 @@ export default function AdminDashboard() {
       const now = new Date();
       const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
       setSelectedMonth(currentMonth);
-    } else if (viewMode === 'audit') {
-      fetchAuditLogs(1);
+    } else if (viewMode === 'attendance') {
+      fetchAttendanceSheet();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewMode]);
 
-  const checkAdminSession = async () => {
-    try {
-      const activeUser = await getCurrentUser();
-      if (!activeUser) {
-        router.push('/');
-        return;
-      }
-      setUser(activeUser);
-    } catch (error) {
-      console.error('Admin session check failed:', error);
-      router.push('/');
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    if (selectedMonth && viewMode === 'payroll') {
+      fetchPayrollReport();
     }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMonth]);
+
+  const selectedEmployee = employees.find(e => e.$id === selectedEmpId);
 
   const handleCreateEmployee = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -185,18 +899,18 @@ export default function AdminDashboard() {
         setNewEmpPassword('');
         setNewEmpSalary('8000');
         setNewEmpJoinDate('');
-        fetchEmployees(); 
+        fetchEmployees();
       } else {
         alert(`❌ ${result.message}`);
       }
-    } catch (error: any) {
-      alert(`Error: ${error.message}`);
+    } catch (error) {
+      alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsCreatingEmp(false);
     }
   };
 
-  const startEditing = (emp: any) => {
+  const startEditing = (emp: Employee) => {
     setEditEmpForm({
       name: emp.name,
       email: emp.email,
@@ -223,23 +937,12 @@ export default function AdminDashboard() {
       if (result.success) {
           alert('✅ Employee updated successfully!');
           setIsEditingEmp(false);
-          fetchEmployees(); // Refresh list to show new data
+          fetchEmployees();
       } else {
           alert(`❌ ${result.message}`);
       }
-    } catch (error: any) {
-      alert(`Error: ${error.message}`);
-    }
-  };
-
-  const fetchHolidays = async () => {
-    try {
-      const result = await getHolidays();
-      if (result.success && result.data) {
-        setHolidays(result.data.holidays);
-      }
     } catch (error) {
-      console.error('Failed to fetch holidays:', error);
+      alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
@@ -256,8 +959,8 @@ export default function AdminDashboard() {
       } else {
         alert(`❌ ${result.message}`);
       }
-    } catch (error: any) {
-      alert(`Error: ${error.message}`);
+    } catch (error) {
+      alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
@@ -271,8 +974,8 @@ export default function AdminDashboard() {
       } else {
         alert(`❌ ${result.message}`);
       }
-    } catch (error: any) {
-      alert(`Error: ${error.message}`);
+    } catch (error) {
+      alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
@@ -284,9 +987,9 @@ export default function AdminDashboard() {
     }
     try {
       const result = await addOfficeLocation(
-        officeName, 
-        parseFloat(officeLat), 
-        parseFloat(officeLng), 
+        officeName,
+        parseFloat(officeLat),
+        parseFloat(officeLng),
         parseInt(officeRadius)
       );
       if (result.success) {
@@ -298,8 +1001,8 @@ export default function AdminDashboard() {
       } else {
         alert(`❌ ${result.message}`);
       }
-    } catch (error: any) {
-      alert(`Error: ${error.message}`);
+    } catch (error) {
+      alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
@@ -309,30 +1012,12 @@ export default function AdminDashboard() {
       const pos = await getCurrentLocation();
       setOfficeLat(pos.coords.latitude.toFixed(6));
       setOfficeLng(pos.coords.longitude.toFixed(6));
-    } catch (error: any) {
+    } catch {
       alert("Could not get location. Ensure GPS is enabled.");
     } finally {
       setIsGettingLoc(false);
     }
   };
-
-  const fetchEmployees = async () => {
-    try {
-      const result = await getEmployees();
-      if (result.success && result.data) {
-        setEmployees(result.data.employees);
-      }
-    } catch (error) {
-      console.error('Failed to fetch employees:', error);
-    }
-  };
-
-  const filteredEmployees = employees.filter(emp => 
-    emp.name.toLowerCase().includes(empFilter.toLowerCase()) || 
-    emp.email.toLowerCase().includes(empFilter.toLowerCase())
-  );
-
-  const selectedEmployee = employees.find(e => e.$id === selectedEmpId);
 
   const handleGeneratePayroll = async () => {
     if (!selectedMonth) {
@@ -349,8 +1034,8 @@ export default function AdminDashboard() {
       } else {
         alert(`❌ ${result.message}`);
       }
-    } catch (error: any) {
-      alert(`Error: ${error.message}`);
+    } catch (error) {
+      alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsGeneratingPayroll(false);
     }
@@ -376,8 +1061,8 @@ export default function AdminDashboard() {
       } else {
         alert(`❌ ${result.message}`);
       }
-    } catch (error: any) {
-      alert(`Error: ${error.message}`);
+    } catch (error) {
+      alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsUnlockingPayroll(false);
     }
@@ -402,8 +1087,8 @@ export default function AdminDashboard() {
       } else {
         alert(`${result.message}`);
       }
-    } catch (error: any) {
-      alert(`Error: ${error.message}`);
+    } catch (error) {
+      alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
@@ -430,18 +1115,18 @@ export default function AdminDashboard() {
       } else {
         alert(`❌ ${result.message}`);
       }
-    } catch (error: any) {
-      alert(`Error: ${error.message}`);
+    } catch (error) {
+      alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
-  const openEditModal = (day: any) => {
+  const openEditModal = (day: AttendanceDay) => {
     if (!day.id) {
         alert("Cannot edit this record (ID missing). Please regenerate payroll.");
         return;
     }
     setEditingAttendance(day);
-    setEditCheckIn(''); 
+    setEditCheckIn('');
     setEditCheckOut('');
     setEditReason('');
   };
@@ -453,11 +1138,11 @@ export default function AdminDashboard() {
         return;
     }
     try {
-      const modifications: any = {};
+      const modifications: Record<string, string> = {};
       const baseDate = editingAttendance.date;
       if (editCheckIn) {
          const localDate = new Date(`${baseDate}T${editCheckIn}`);
-         modifications.checkInTime = localDate.toISOString(); 
+         modifications.checkInTime = localDate.toISOString();
       }
       if (editCheckOut) {
          const localDate = new Date(`${baseDate}T${editCheckOut}`);
@@ -471,38 +1156,64 @@ export default function AdminDashboard() {
       } else {
         alert(`❌ ${result.message}`);
       }
-    } catch (error: any) {
-      alert(`Error: ${error.message}`);
+    } catch (error) {
+      alert(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
-  useEffect(() => {
-    if (selectedMonth && viewMode === 'payroll') {
-      fetchPayrollReport();
-    }
-  }, [selectedMonth]);
-
-  const fetchAuditLogs = async (page: number, filter?: string) => {
+  const fetchAttendanceSheet = async (date?: string) => {
+    setIsLoadingAttendance(true);
     try {
-      const offset = (page - 1) * AUDIT_LIMIT;
-      const filters: any = {};
-      if (filter) {
-        filters.action = filter;
+      const targetDate = date || attendanceDate;
+
+      let result;
+      if (attendanceViewMode === 'week') {
+        // Get week range
+        const d = new Date(targetDate);
+        const dayOfWeek = d.getDay();
+        const startOfWeek = new Date(d);
+        startOfWeek.setDate(d.getDate() - dayOfWeek);
+        const endOfWeek = new Date(startOfWeek);
+        endOfWeek.setDate(startOfWeek.getDate() + 6);
+
+        result = await getAllAttendance(
+          undefined,
+          startOfWeek.toISOString().split('T')[0],
+          endOfWeek.toISOString().split('T')[0]
+        );
+      } else {
+        result = await getAllAttendance(targetDate);
       }
-      const result = await getAuditLogs(filters, AUDIT_LIMIT, offset);
+
       if (result.success && result.data) {
-        setAuditLogs(result.data.logs);
-        setAuditTotal(result.data.total);
-        setAuditPage(page);
+        setAttendanceRecords(result.data.records);
+        setAttendanceSummary(result.data.summary);
       }
     } catch (error) {
-      console.error('Failed to fetch audit logs:', error);
+      console.error('Failed to fetch attendance:', error);
+    } finally {
+      setIsLoadingAttendance(false);
     }
   };
 
-  const handleAuditFilterChange = (filter: string) => {
-    setAuditFilter(filter);
-    fetchAuditLogs(1, filter);
+  const handleDateChange = (newDate: string) => {
+    setAttendanceDate(newDate);
+    fetchAttendanceSheet(newDate);
+  };
+
+  const navigateDate = (direction: 'prev' | 'next') => {
+    const current = new Date(attendanceDate);
+    if (attendanceViewMode === 'week') {
+      current.setDate(current.getDate() + (direction === 'next' ? 7 : -7));
+    } else {
+      current.setDate(current.getDate() + (direction === 'next' ? 1 : -1));
+    }
+    handleDateChange(current.toISOString().split('T')[0]);
+  };
+
+  const goToToday = () => {
+    const today = new Date().toISOString().split('T')[0];
+    handleDateChange(today);
   };
 
   const handleChangePassword = async (e: React.FormEvent) => {
@@ -525,468 +1236,98 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleLogout = async () => {
-    await apiLogout();
-    router.push('/');
-  };
-
-  const formatDateTime = (isoString: string) => {
-    const date = new Date(isoString);
-    return date.toLocaleString('en-IN', {
-      timeZone: 'Asia/Kolkata',
-      dateStyle: 'medium',
-      timeStyle: 'short'
-    });
-  };
-
   if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
-        <div className="text-center space-y-4">
-          <div className="w-16 h-16 border-4 border-cyan-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
-          <p className="text-slate-400 font-mono">Loading Admin Panel...</p>
-        </div>
-      </div>
-    );
+    return <LoadingSpinner />;
   }
 
   return (
     <div className="min-h-screen bg-slate-900 text-white relative">
-      {/* Header */}
-      <div className="bg-slate-800 border-b border-slate-700 px-4 py-4 sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <ShieldCheckIcon className="w-8 h-8 text-cyan-400" />
-            <div>
-              <h1 className="text-xl font-bold">Admin Dashboard</h1>
-              <p className="text-xs text-slate-400">{user?.name}</p>
-            </div>
-          </div>
-          <button
-            onClick={handleLogout}
-            className="text-sm font-bold text-red-400 hover:text-red-500 underline decoration-2"
-          >
-            Logout
-          </button>
-        </div>
-      </div>
+      <Header userName={user?.name || ''} onLogout={handleLogout} />
+      <TabNavigation viewMode={viewMode} changeTab={changeTab} />
 
-      {/* Tab Navigation */}
-      <div className="bg-slate-800 border-b border-slate-700 px-4">
-        <div className="max-w-7xl mx-auto flex gap-1 overflow-x-auto">
-          {[
-            { id: 'manage' as ViewMode, icon: UserPlusIcon, label: 'Manage' },
-            { id: 'payroll' as ViewMode, icon: CurrencyRupeeIcon, label: 'Payroll' },
-            { id: 'audit' as ViewMode, icon: ClipboardDocumentListIcon, label: 'Audit' },
-            { id: 'settings' as ViewMode, icon: Cog6ToothIcon, label: 'Settings' }
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => changeTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-3 text-sm font-bold border-b-2 transition whitespace-nowrap ${
-                viewMode === tab.id
-                  ? 'border-cyan-400 text-cyan-400'
-                  : 'border-transparent text-slate-400 hover:text-slate-300'
-              }`}
-            >
-              <tab.icon className="w-5 h-5" />
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Content */}
       <div className="max-w-7xl mx-auto p-4">
-        {/* MANAGE TAB */}
         {viewMode === 'manage' && (
           <div className="space-y-6">
-            
-            {/* EMPLOYEE FINDER & DETAILS SECTION */}
             <div className="bg-slate-800 rounded-lg p-6 border border-slate-700 space-y-4">
               <h2 className="text-lg font-bold text-cyan-400 flex items-center gap-2">
                 <ClipboardDocumentListIcon className="w-6 h-6" />
                 Find Employee
               </h2>
 
-              {/* Searchable Dropdown Container */}
-              <div className="relative" ref={empDropdownRef}>
-                <div className="flex items-center gap-2 bg-slate-700 border border-slate-600 rounded-lg p-2 focus-within:ring-2 focus-within:ring-cyan-400">
-                  <MagnifyingGlassIcon className="w-5 h-5 text-slate-400 ml-2" />
-                  <input
-                    type="text"
-                    placeholder="Search employee by name or email..."
-                    className="flex-1 bg-transparent border-none focus:ring-0 text-white placeholder-slate-400 outline-none h-8"
-                    value={empFilter}
-                    onChange={(e) => {
-                      setEmpFilter(e.target.value);
-                      setShowEmpList(true);
-                      if (!e.target.value) setSelectedEmpId(null);
-                    }}
-                    onFocus={() => setShowEmpList(true)}
-                  />
-                  {selectedEmpId ? (
-                    <button 
-                       onClick={() => { setSelectedEmpId(null); setEmpFilter(''); setIsEditingEmp(false); }}
-                       className="text-slate-400 hover:text-white"
-                    >
-                      <XMarkIcon className="w-5 h-5" />
-                    </button>
-                  ) : (
-                    <ChevronDownIcon className="w-5 h-5 text-slate-400 mr-2" />
-                  )}
-                </div>
+              <EmployeeSearchDropdown
+                employees={employees}
+                empFilter={empFilter}
+                setEmpFilter={setEmpFilter}
+                selectedEmpId={selectedEmpId}
+                setSelectedEmpId={setSelectedEmpId}
+                showEmpList={showEmpList}
+                setShowEmpList={setShowEmpList}
+                setIsEditingEmp={setIsEditingEmp}
+                empDropdownRef={empDropdownRef}
+              />
 
-                {/* Dropdown List */}
-                {showEmpList && (
-                  <div className="absolute z-50 w-full mt-2 bg-slate-800 border border-slate-600 rounded-lg shadow-xl max-h-60 overflow-y-auto">
-                    {filteredEmployees.length === 0 ? (
-                      <div className="p-4 text-center text-slate-500 text-sm">No matches found</div>
-                    ) : (
-                      filteredEmployees.map(emp => (
-                        <div
-                          key={emp.$id}
-                          className="px-4 py-3 hover:bg-slate-700 cursor-pointer border-b border-slate-700 last:border-0 transition"
-                          onClick={() => {
-                            setSelectedEmpId(emp.$id);
-                            setEmpFilter(emp.name);
-                            setShowEmpList(false);
-                            setIsEditingEmp(false);
-                          }}
-                        >
-                          <p className="font-bold text-white">{emp.name}</p>
-                          <p className="text-xs text-slate-400">{emp.email}</p>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Selected Employee Details Card OR Edit Form */}
               {selectedEmployee && (
                 <div className="mt-6 bg-slate-750 border border-slate-600 rounded-lg p-6 animate-fade-in relative">
-                  
                   {!isEditingEmp ? (
-                    // === VIEW MODE ===
-                    <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-4">
-                        <div className={`w-16 h-16 rounded-full flex items-center justify-center border ${
-                          selectedEmployee.isActive ? 'bg-cyan-900/50 text-cyan-400 border-cyan-800' : 'bg-red-900/50 text-red-400 border-red-800'
-                        }`}>
-                          <UserIcon className="w-8 h-8" />
-                        </div>
-                        <div>
-                          <h3 className="text-2xl font-bold text-white">{selectedEmployee.name}</h3>
-                          <p className="text-slate-400">{selectedEmployee.email}</p>
-                          <div className="flex gap-2 mt-2">
-                             <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                                selectedEmployee.isActive 
-                                  ? 'bg-green-900/50 text-green-400 border border-green-800' 
-                                  : 'bg-red-900/50 text-red-400 border border-red-800'
-                              }`}>
-                                {selectedEmployee.isActive ? 'Active' : 'Inactive'}
-                              </span>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <div className="text-right space-y-1">
-                        <p className="text-xs text-slate-400 uppercase font-bold">Monthly Salary</p>
-                        <p className="text-2xl font-mono text-cyan-400">₹{selectedEmployee.salaryMonthly?.toLocaleString()}</p>
-                        <p className="text-xs text-slate-500 pt-2">Joined: {new Date(selectedEmployee.joinDate).toLocaleDateString()}</p>
-                        
-                        {/* Edit Button */}
-                        <button 
-                          onClick={() => startEditing(selectedEmployee)}
-                          className="mt-4 flex items-center gap-2 text-sm font-bold text-cyan-400 hover:text-cyan-300 bg-slate-800 px-3 py-2 rounded border border-slate-600 hover:border-cyan-400 transition ml-auto"
-                        >
-                          <PencilSquareIcon className="w-4 h-4" /> Edit Profile
-                        </button>
-                      </div>
-                    </div>
+                    <EmployeeDetailsView
+                      employee={selectedEmployee}
+                      onEdit={() => startEditing(selectedEmployee)}
+                    />
                   ) : (
-                    // === EDIT MODE ===
-                    <form onSubmit={handleSubmitUpdateEmployee} className="space-y-4">
-                      <div className="flex items-center justify-between mb-4 border-b border-slate-600 pb-2">
-                        <h3 className="font-bold text-white flex items-center gap-2">
-                          <PencilSquareIcon className="w-5 h-5 text-cyan-400" />
-                          Edit Employee
-                        </h3>
-                        <button 
-                           type="button" 
-                           onClick={() => setIsEditingEmp(false)}
-                           className="text-slate-400 hover:text-white"
-                        >
-                           <XMarkIcon className="w-6 h-6" />
-                        </button>
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                         <div>
-                            <label className="text-xs font-bold text-slate-400 uppercase">Full Name</label>
-                            <input 
-                              type="text" 
-                              value={editEmpForm.name}
-                              onChange={e => setEditEmpForm({...editEmpForm, name: e.target.value})}
-                              className="w-full mt-1 p-2 bg-slate-900 border border-slate-600 rounded text-white"
-                            />
-                         </div>
-                         <div>
-                            <label className="text-xs font-bold text-slate-400 uppercase">Email</label>
-                            <input 
-                              type="email" 
-                              value={editEmpForm.email}
-                              onChange={e => setEditEmpForm({...editEmpForm, email: e.target.value})}
-                              className="w-full mt-1 p-2 bg-slate-900 border border-slate-600 rounded text-white"
-                            />
-                         </div>
-                         <div>
-                            <label className="text-xs font-bold text-slate-400 uppercase">Monthly Salary (₹)</label>
-                            <input 
-                              type="number" 
-                              value={editEmpForm.salary}
-                              onChange={e => setEditEmpForm({...editEmpForm, salary: e.target.value})}
-                              className="w-full mt-1 p-2 bg-slate-900 border border-slate-600 rounded text-white font-mono text-cyan-400"
-                            />
-                         </div>
-                         <div>
-                            <label className="text-xs font-bold text-slate-400 uppercase">Join Date</label>
-                            <input 
-                              type="date" 
-                              value={editEmpForm.joinDate}
-                              onChange={e => setEditEmpForm({...editEmpForm, joinDate: e.target.value})}
-                              className="w-full mt-1 p-2 bg-slate-900 border border-slate-600 rounded text-white"
-                            />
-                         </div>
-                      </div>
-
-                      <div className="pt-2">
-                         <label className="flex items-center gap-2 cursor-pointer group">
-                            <div className={`w-10 h-6 rounded-full p-1 transition-colors ${editEmpForm.isActive ? 'bg-green-600' : 'bg-slate-600'}`}>
-                               <div className={`w-4 h-4 bg-white rounded-full shadow-md transform transition-transform ${editEmpForm.isActive ? 'translate-x-4' : 'translate-x-0'}`} />
-                            </div>
-                            <input 
-                               type="checkbox" 
-                               className="hidden" 
-                               checked={editEmpForm.isActive} 
-                               onChange={e => setEditEmpForm({...editEmpForm, isActive: e.target.checked})} 
-                            />
-                            <span className="text-sm font-bold text-slate-300 group-hover:text-white">
-                               {editEmpForm.isActive ? 'Account is Active' : 'Account is Inactive (Cannot Login)'}
-                            </span>
-                         </label>
-                      </div>
-
-                      <div className="flex gap-3 pt-2">
-                         <button 
-                           type="submit" 
-                           className="flex-1 bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 rounded transition"
-                         >
-                            Save Changes
-                         </button>
-                         <button 
-                           type="button" 
-                           onClick={() => setIsEditingEmp(false)} 
-                           className="px-6 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-2 rounded transition border border-slate-600"
-                         >
-                            Cancel
-                         </button>
-                      </div>
-                    </form>
+                    <EmployeeEditForm
+                      editEmpForm={editEmpForm}
+                      setEditEmpForm={setEditEmpForm}
+                      onSubmit={handleSubmitUpdateEmployee}
+                      onCancel={() => setIsEditingEmp(false)}
+                    />
                   )}
                 </div>
               )}
             </div>
 
-            {/* Create Employee (Collapsed/Compact version could be nice, but keeping full for now) */}
-            <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
-              <h2 className="text-lg font-bold text-cyan-400 mb-4 flex items-center gap-2">
-                <UserPlusIcon className="w-6 h-6" />
-                Create New Employee
-              </h2>
-              <form onSubmit={handleCreateEmployee} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <input
-                  type="text"
-                  placeholder="Full Name"
-                  value={newEmpName}
-                  onChange={e => setNewEmpName(e.target.value)}
-                  className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
-                  required
-                />
-                <input
-                  type="email"
-                  placeholder="Email"
-                  value={newEmpEmail}
-                  onChange={e => setNewEmpEmail(e.target.value)}
-                  className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
-                  required
-                />
-                <input
-                  type="password"
-                  placeholder="Password"
-                  value={newEmpPassword}
-                  onChange={e => setNewEmpPassword(e.target.value)}
-                  className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
-                  required
-                />
-                <input
-                  type="number"
-                  placeholder="Monthly Salary"
-                  value={newEmpSalary}
-                  onChange={e => setNewEmpSalary(e.target.value)}
-                  className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
-                  required
-                />
-                <input
-                  type="date"
-                  placeholder="Join Date"
-                  value={newEmpJoinDate}
-                  onChange={e => setNewEmpJoinDate(e.target.value)}
-                  className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
-                  required
-                />
-                <button
-                  type="submit"
-                  disabled={isCreatingEmp}
-                  className="bg-cyan-600 hover:bg-cyan-700 px-6 py-3 rounded-lg font-bold transition disabled:opacity-50"
-                >
-                  {isCreatingEmp ? 'Creating...' : 'Create Employee'}
-                </button>
-              </form>
-            </div>
+            <CreateEmployeeForm
+              newEmpName={newEmpName}
+              setNewEmpName={setNewEmpName}
+              newEmpEmail={newEmpEmail}
+              setNewEmpEmail={setNewEmpEmail}
+              newEmpPassword={newEmpPassword}
+              setNewEmpPassword={setNewEmpPassword}
+              newEmpSalary={newEmpSalary}
+              setNewEmpSalary={setNewEmpSalary}
+              newEmpJoinDate={newEmpJoinDate}
+              setNewEmpJoinDate={setNewEmpJoinDate}
+              isCreatingEmp={isCreatingEmp}
+              onSubmit={handleCreateEmployee}
+            />
 
-            {/* Office Locations Management */}
-            <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
-              <h2 className="text-lg font-bold text-cyan-400 mb-4 flex items-center gap-2">
-                <MapPinIcon className="w-6 h-6" />
-                Office Locations
-              </h2>
-              
-              <form onSubmit={handleAddOffice} className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <input
-                      type="text"
-                      placeholder="Location Name (e.g. HQ)"
-                      value={officeName}
-                      onChange={e => setOfficeName(e.target.value)}
-                      className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white"
-                      required
-                    />
-                     <input
-                      type="number"
-                      placeholder="Radius (Meters)"
-                      value={officeRadius}
-                      onChange={e => setOfficeRadius(e.target.value)}
-                      className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white"
-                      required
-                    />
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="flex gap-2">
-                        <input
-                          type="number"
-                          step="any"
-                          placeholder="Latitude"
-                          value={officeLat}
-                          onChange={e => setOfficeLat(e.target.value)}
-                          className="flex-1 p-3 bg-slate-700 border border-slate-600 rounded-lg text-white"
-                          required
-                        />
-                         <input
-                          type="number"
-                          step="any"
-                          placeholder="Longitude"
-                          value={officeLng}
-                          onChange={e => setOfficeLng(e.target.value)}
-                          className="flex-1 p-3 bg-slate-700 border border-slate-600 rounded-lg text-white"
-                          required
-                        />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleGetMyLocation}
-                      disabled={isGettingLoc}
-                      className="bg-slate-700 hover:bg-slate-600 border border-slate-600 text-cyan-400 px-4 py-3 rounded-lg font-bold transition flex items-center justify-center gap-2"
-                    >
-                      <MapPinIcon className="w-5 h-5" />
-                      {isGettingLoc ? "Locating..." : "Get My Current Location"}
-                    </button>
-                </div>
-                
-                <button
-                  type="submit"
-                  className="w-full bg-cyan-600 hover:bg-cyan-700 px-6 py-3 rounded-lg font-bold transition"
-                >
-                  Add Office Location
-                </button>
-              </form>
-            </div>
+            <OfficeLocationForm
+              officeName={officeName}
+              setOfficeName={setOfficeName}
+              officeLat={officeLat}
+              setOfficeLat={setOfficeLat}
+              officeLng={officeLng}
+              setOfficeLng={setOfficeLng}
+              officeRadius={officeRadius}
+              setOfficeRadius={setOfficeRadius}
+              isGettingLoc={isGettingLoc}
+              onGetLocation={handleGetMyLocation}
+              onSubmit={handleAddOffice}
+            />
 
-            {/* Holiday Management */}
-            <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
-              <h2 className="text-lg font-bold text-cyan-400 mb-4 flex items-center gap-2">
-                <CalendarDaysIcon className="w-6 h-6" />
-                Holiday Management
-              </h2>
-
-              <form onSubmit={handleAddHoliday} className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-                <input
-                  type="date"
-                  value={newHolidayDate}
-                  onChange={e => setNewHolidayDate(e.target.value)}
-                  className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
-                  required
-                />
-                <input
-                  type="text"
-                  placeholder="Holiday Name"
-                  value={newHolidayName}
-                  onChange={e => setNewHolidayName(e.target.value)}
-                  className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
-                  required
-                />
-                <input
-                  type="text"
-                  placeholder="Description"
-                  value={newHolidayDesc}
-                  onChange={e => setNewHolidayDesc(e.target.value)}
-                  className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
-                />
-                <button
-                  type="submit"
-                  className="bg-green-600 hover:bg-green-700 px-6 py-3 rounded-lg font-bold transition flex items-center justify-center gap-2"
-                >
-                  <PlusCircleIcon className="w-5 h-5" />
-                  Add Holiday
-                </button>
-              </form>
-
-              <div className="space-y-2">
-                {holidays.length === 0 ? (
-                  <p className="text-center text-slate-500 py-4">No holidays configured</p>
-                ) : (
-                  holidays.map(holiday => (
-                    <div key={holiday.$id} className="flex items-center justify-between bg-slate-700 p-3 rounded-lg">
-                      <div>
-                        <p className="font-bold text-white">{holiday.name}</p>
-                        <p className="text-sm text-slate-400">{holiday.date} - {holiday.description}</p>
-                      </div>
-                      <button
-                        onClick={() => handleDeleteHoliday(holiday.$id, holiday.name)}
-                        className="text-red-400 hover:text-red-500 p-2"
-                      >
-                        <TrashIcon className="w-5 h-5" />
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
+            <HolidayManagementSection
+              holidays={holidays}
+              newHolidayDate={newHolidayDate}
+              setNewHolidayDate={setNewHolidayDate}
+              newHolidayName={newHolidayName}
+              setNewHolidayName={setNewHolidayName}
+              newHolidayDesc={newHolidayDesc}
+              setNewHolidayDesc={setNewHolidayDesc}
+              onAddHoliday={handleAddHoliday}
+              onDeleteHoliday={handleDeleteHoliday}
+            />
           </div>
         )}
 
-        {/* PAYROLL TAB */}
         {viewMode === 'payroll' && (
           <div className="space-y-6">
             <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
@@ -1012,42 +1353,38 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              {/* Payroll Actions: Unlock & Reset */}
               {payrollReports.length > 0 && (
                 <div className="mt-4 pt-4 border-t border-slate-700 space-y-4">
-                  
-                  {/* UNLOCK SECTION (Only if Locked) */}
                   {payrollReports[0]?.isLocked && (
                     <div>
                       <h3 className="text-sm font-bold text-amber-400 mb-2">Unlock for Editing</h3>
                       <div className="flex gap-3">
-                        <input 
-                          type="text" 
-                          placeholder="Reason (required)" 
-                          value={unlockReason} 
-                          onChange={e => setUnlockReason(e.target.value)} 
-                          className="flex-1 p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-amber-400" 
+                        <input
+                          type="text"
+                          placeholder="Reason (required)"
+                          value={unlockReason}
+                          onChange={e => setUnlockReason(e.target.value)}
+                          className="flex-1 p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-amber-400"
                         />
-                        <button 
-                          onClick={handleUnlockPayroll} 
-                          disabled={isUnlockingPayroll || !unlockReason.trim()} 
+                        <button
+                          onClick={handleUnlockPayroll}
+                          disabled={isUnlockingPayroll || !unlockReason.trim()}
                           className="bg-amber-600 hover:bg-amber-700 px-6 py-3 rounded-lg font-bold transition disabled:opacity-50 flex items-center gap-2"
                         >
-                          <LockOpenIcon className="w-5 h-5" /> 
+                          <LockOpenIcon className="w-5 h-5" />
                           {isUnlockingPayroll ? 'Unlocking...' : 'Unlock'}
                         </button>
                       </div>
                     </div>
                   )}
 
-                  {/* RESET SECTION (Always visible if payroll exists) */}
                   <div>
                     <h3 className="text-sm font-bold text-red-400 mb-2">Danger Zone</h3>
                     <div className="flex items-center justify-between bg-red-900/20 p-3 rounded-lg border border-red-900/50">
                       <p className="text-sm text-red-200">
                         Missing an employee? Resetting will delete this report and allow you to Regenerate.
                       </p>
-                      <button 
+                      <button
                         onClick={handleResetPayroll}
                         className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded font-bold text-sm transition flex items-center gap-2"
                       >
@@ -1056,7 +1393,6 @@ export default function AdminDashboard() {
                       </button>
                     </div>
                   </div>
-
                 </div>
               )}
             </div>
@@ -1075,10 +1411,10 @@ export default function AdminDashboard() {
                              <h3 className="font-bold text-lg text-white">{report.employeeName}</h3>
                              <button
                                onClick={(e) => {
-                                 e.stopPropagation(); 
+                                 e.stopPropagation();
                                  handleResetDevice(report.employeeId, report.employeeName);
                                }}
-                               className="p-1 text-slate-500 hover:text-cyan-400 transition"
+                               className="p-1.5 bg-amber-900/50 text-amber-400 hover:bg-amber-800 hover:text-amber-300 rounded-lg border border-amber-700/50 transition"
                                title="Reset Device Binding"
                              >
                                <DevicePhoneMobileIcon className="w-5 h-5" />
@@ -1128,8 +1464,8 @@ export default function AdminDashboard() {
                       <div className="border-t border-slate-700 p-4 bg-slate-900/50">
                         <h4 className="font-bold text-cyan-400 mb-3">Daily Breakdown</h4>
                         <div className="max-h-96 overflow-y-auto space-y-1">
-                          {report.dailyBreakdown.map((day: any, idx) => (
-                            <div key={idx} className="flex items-center justify-between bg-slate-800 p-2 rounded text-sm">
+                          {report.dailyBreakdown.map((day: AttendanceDay) => (
+                            <div key={day.id || day.date} className="flex items-center justify-between bg-slate-800 p-2 rounded text-sm">
                               <div className="flex items-center gap-3">
                                 <span className="text-slate-400 w-24">{day.date}</span>
                                 <span className="text-slate-400 w-12">{day.day}</span>
@@ -1143,9 +1479,9 @@ export default function AdminDashboard() {
                                 }`}>
                                   {day.status}
                                 </span>
-                                <button 
+                                <button
                                   onClick={() => openEditModal(day)}
-                                  className="text-slate-500 hover:text-cyan-400 p-1"
+                                  className="p-1.5 bg-cyan-900/50 text-cyan-400 hover:bg-cyan-800 hover:text-cyan-300 rounded border border-cyan-700/50 transition"
                                   title="Edit Attendance"
                                 >
                                   <PencilSquareIcon className="w-4 h-4" />
@@ -1175,84 +1511,273 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* AUDIT TAB */}
-        {viewMode === 'audit' && (
+        {viewMode === 'attendance' && (
           <div className="space-y-6">
-            <div className="bg-slate-800 rounded-lg p-4 border border-slate-700 flex items-center gap-4">
-              <MagnifyingGlassIcon className="w-5 h-5 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Filter by action (e.g., check-in, check-out)..."
-                value={auditFilter}
-                onChange={e => handleAuditFilterChange(e.target.value)}
-                className="flex-1 p-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
-              />
-            </div>
+            {/* Date Navigation & Summary */}
+            <div className="bg-slate-800 rounded-lg p-4 border border-slate-700">
+              <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+                {/* Date Controls */}
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => navigateDate('prev')}
+                    className="p-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition"
+                  >
+                    <ChevronLeftIcon className="w-5 h-5" />
+                  </button>
 
-            <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
-              <div className="max-h-[600px] overflow-y-auto">
-                {auditLogs.length === 0 ? (
-                  <div className="p-12 text-center">
-                    <ClipboardDocumentListIcon className="w-16 h-16 text-slate-600 mx-auto mb-4" />
-                    <p className="text-slate-400">No audit logs found</p>
-                  </div>
-                ) : (
-                  <div className="divide-y divide-slate-700">
-                    {auditLogs.map(log => (
-                      <div key={log.id} className="p-4 hover:bg-slate-750 transition">
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-3 mb-1">
-                              <span className={`px-2 py-1 rounded text-xs font-bold ${
-                                log.action === 'check-in' ? 'bg-green-900/50 text-green-400' :
-                                log.action === 'check-out' ? 'bg-red-900/50 text-red-400' :
-                                'bg-cyan-900/50 text-cyan-400'
-                              }`}>
-                                {log.action}
-                              </span>
-                              <span className="font-bold text-white">{log.actorName}</span>
-                              {log.signatureVerified && (
-                                <ShieldCheckIcon className="w-4 h-4 text-green-400" title="Signature Verified" />
-                              )}
-                            </div>
-                            <p className="text-sm text-slate-400 mb-1">{log.details}</p>
-                            <p className="text-xs text-slate-500">{formatDateTime(log.timestamp)}</p>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                  <input
+                    type="date"
+                    value={attendanceDate}
+                    onChange={e => handleDateChange(e.target.value)}
+                    className="p-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+                  />
+
+                  <button
+                    onClick={() => navigateDate('next')}
+                    className="p-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition"
+                  >
+                    <ChevronRightIcon className="w-5 h-5" />
+                  </button>
+
+                  <button
+                    onClick={goToToday}
+                    className="px-3 py-2 bg-cyan-600 hover:bg-cyan-700 rounded-lg font-bold text-sm transition"
+                  >
+                    Today
+                  </button>
+
+                  <button
+                    onClick={() => fetchAttendanceSheet()}
+                    disabled={isLoadingAttendance}
+                    className="p-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition"
+                    title="Refresh"
+                  >
+                    <ArrowPathIcon className={`w-5 h-5 ${isLoadingAttendance ? 'animate-spin' : ''}`} />
+                  </button>
+                </div>
+
+                {/* View Mode Toggle */}
+                <div className="flex items-center gap-2 bg-slate-700 rounded-lg p-1">
+                  <button
+                    onClick={() => { setAttendanceViewMode('day'); fetchAttendanceSheet(); }}
+                    className={`px-3 py-1.5 rounded text-sm font-bold transition ${
+                      attendanceViewMode === 'day' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Day
+                  </button>
+                  <button
+                    onClick={() => { setAttendanceViewMode('week'); fetchAttendanceSheet(); }}
+                    className={`px-3 py-1.5 rounded text-sm font-bold transition ${
+                      attendanceViewMode === 'week' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Week
+                  </button>
+                </div>
               </div>
 
-              {auditTotal > AUDIT_LIMIT && (
-                <div className="border-t border-slate-700 p-4 flex items-center justify-between">
-                  <p className="text-sm text-slate-400">
-                    Showing {(auditPage - 1) * AUDIT_LIMIT + 1} - {Math.min(auditPage * AUDIT_LIMIT, auditTotal)} of {auditTotal}
-                  </p>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => fetchAuditLogs(auditPage - 1)}
-                      disabled={auditPage === 1}
-                      className="px-4 py-2 bg-slate-700 rounded-lg font-bold hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Previous
-                    </button>
-                    <button
-                      onClick={() => fetchAuditLogs(auditPage + 1)}
-                      disabled={auditPage * AUDIT_LIMIT >= auditTotal}
-                      className="px-4 py-2 bg-slate-700 rounded-lg font-bold hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      Next
-                    </button>
+              {/* Today's Summary Cards */}
+              {attendanceSummary && attendanceDate === new Date().toISOString().split('T')[0] && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4 pt-4 border-t border-slate-700">
+                  <div className="bg-slate-700/50 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold text-white">{attendanceSummary.totalEmployees}</p>
+                    <p className="text-xs text-slate-400">Total Staff</p>
+                  </div>
+                  <div className="bg-green-900/30 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold text-green-400">{attendanceSummary.checkedIn}</p>
+                    <p className="text-xs text-slate-400">Checked In</p>
+                  </div>
+                  <div className="bg-blue-900/30 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold text-blue-400">{attendanceSummary.checkedOut}</p>
+                    <p className="text-xs text-slate-400">Checked Out</p>
+                  </div>
+                  <div className="bg-amber-900/30 rounded-lg p-3 text-center">
+                    <p className="text-2xl font-bold text-amber-400">{attendanceSummary.notYetIn}</p>
+                    <p className="text-xs text-slate-400">Not Yet In</p>
                   </div>
                 </div>
               )}
             </div>
+
+            {/* Attendance Table */}
+            <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
+              {isLoadingAttendance ? (
+                <div className="p-12 text-center">
+                  <ArrowPathIcon className="w-12 h-12 text-cyan-400 mx-auto mb-4 animate-spin" />
+                  <p className="text-slate-400">Loading attendance...</p>
+                </div>
+              ) : attendanceRecords.length === 0 ? (
+                <div className="p-12 text-center">
+                  <ClipboardDocumentListIcon className="w-16 h-16 text-slate-600 mx-auto mb-4" />
+                  <p className="text-slate-400">No attendance records found</p>
+                  <p className="text-sm text-slate-500 mt-2">Select a date to view attendance</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-slate-700/50 text-xs text-slate-400 uppercase">
+                      <tr>
+                        <th className="px-4 py-3 text-left font-bold">Employee</th>
+                        <th className="px-3 py-3 text-center font-bold w-20">Status</th>
+                        <th className="px-3 py-3 text-center font-bold w-24">In</th>
+                        <th className="px-3 py-3 text-center font-bold w-24">Out</th>
+                        <th className="px-3 py-3 text-center font-bold w-16">Hours</th>
+                        <th className="px-3 py-3 text-left font-bold hidden md:table-cell">Notes</th>
+                        <th className="px-3 py-3 text-center font-bold w-12"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-700/50">
+                      {attendanceRecords.map((dayRecord) => (
+                        <>
+                          {/* Day Header (for week view) */}
+                          {attendanceViewMode === 'week' && (
+                            <tr key={`header-${dayRecord.date}`}>
+                              <td colSpan={7} className={`px-4 py-2 font-bold text-sm ${
+                                dayRecord.isSunday ? 'bg-blue-900/30 text-blue-400' : 'bg-slate-700/30 text-slate-300'
+                              }`}>
+                                {dayRecord.day}, {new Date(dayRecord.date).toLocaleDateString('en-IN', {
+                                  day: 'numeric', month: 'short', year: 'numeric'
+                                })}
+                                {dayRecord.isSunday && <span className="ml-2 text-xs opacity-70">(Sunday)</span>}
+                              </td>
+                            </tr>
+                          )}
+                          {dayRecord.employees.map((emp) => (
+                            <tr
+                              key={`${dayRecord.date}-${emp.employeeId}`}
+                              className={`hover:bg-slate-700/30 transition ${
+                                dayRecord.isSunday ? 'bg-blue-900/5' : ''
+                              }`}
+                            >
+                              {/* Employee Info */}
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-3">
+                                  <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${
+                                    emp.status === 'present' ? 'bg-green-900/50 text-green-400' :
+                                    emp.status === 'half_day' ? 'bg-yellow-900/50 text-yellow-400' :
+                                    emp.status === 'absent' ? 'bg-red-900/50 text-red-400' :
+                                    emp.status === 'sunday' ? 'bg-blue-900/50 text-blue-400' :
+                                    emp.status === 'holiday' ? 'bg-purple-900/50 text-purple-400' :
+                                    emp.status === 'leave' ? 'bg-cyan-900/50 text-cyan-400' :
+                                    'bg-slate-700 text-slate-400'
+                                  }`}>
+                                    {emp.employeeName.charAt(0).toUpperCase()}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="font-bold text-white truncate">{emp.employeeName}</p>
+                                    <p className="text-xs text-slate-500">
+                                      {emp.status ? emp.status.replace('_', ' ').toUpperCase() : 'NO RECORD'}
+                                    </p>
+                                  </div>
+                                </div>
+                              </td>
+
+                              {/* Status Icon */}
+                              <td className="px-3 py-3 text-center">
+                                {emp.checkInTime ? (
+                                  <CheckCircleIcon className="w-5 h-5 text-green-400 mx-auto" title="Checked In" />
+                                ) : emp.status === 'sunday' || emp.status === 'holiday' ? (
+                                  <CalendarDaysIcon className="w-5 h-5 text-blue-400 mx-auto" title={emp.status || ''} />
+                                ) : (
+                                  <XCircleIcon className="w-5 h-5 text-slate-500 mx-auto" title="Not Checked In" />
+                                )}
+                              </td>
+
+                              {/* Check In Time */}
+                              <td className="px-3 py-3 text-center">
+                                <p className={`font-mono text-sm ${emp.checkInTime ? 'text-green-400' : 'text-slate-600'}`}>
+                                  {emp.checkInTime
+                                    ? new Date(emp.checkInTime).toLocaleTimeString('en-IN', {
+                                        hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata'
+                                      })
+                                    : '--:--'
+                                  }
+                                </p>
+                              </td>
+
+                              {/* Check Out Time */}
+                              <td className="px-3 py-3 text-center">
+                                <p className={`font-mono text-sm ${emp.checkOutTime ? 'text-orange-400' : 'text-slate-600'}`}>
+                                  {emp.checkOutTime
+                                    ? new Date(emp.checkOutTime).toLocaleTimeString('en-IN', {
+                                        hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata'
+                                      })
+                                    : '--:--'
+                                  }
+                                </p>
+                              </td>
+
+                              {/* Hours */}
+                              <td className="px-3 py-3 text-center">
+                                <p className={`font-mono font-bold text-sm ${
+                                  emp.workHours >= 6 ? 'text-green-400' :
+                                  emp.workHours >= 4 ? 'text-yellow-400' :
+                                  emp.workHours > 0 ? 'text-red-400' :
+                                  'text-slate-600'
+                                }`}>
+                                  {emp.workHours > 0 ? emp.workHours.toFixed(1) : '-'}
+                                </p>
+                              </td>
+
+                              {/* Notes */}
+                              <td className="px-3 py-3 hidden md:table-cell">
+                                <p className="text-xs text-slate-500 truncate max-w-[180px]" title={emp.notes || ''}>
+                                  {emp.notes || '-'}
+                                </p>
+                              </td>
+
+                              {/* Lock Status */}
+                              <td className="px-3 py-3 text-center">
+                                {emp.isLocked ? (
+                                  <LockClosedIcon className="w-4 h-4 text-amber-500 mx-auto" title="Locked" />
+                                ) : (
+                                  <LockOpenIcon className="w-4 h-4 text-slate-600 mx-auto" title="Unlocked" />
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Legend */}
+            <div className="bg-slate-800 rounded-lg p-4 border border-slate-700">
+              <p className="text-xs text-slate-500 mb-2 font-bold">STATUS LEGEND</p>
+              <div className="flex flex-wrap gap-4 text-xs">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                  <span className="text-slate-400">Present (6+ hrs)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+                  <span className="text-slate-400">Half Day (4-6 hrs)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                  <span className="text-slate-400">Absent (&lt;4 hrs)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-blue-500"></div>
+                  <span className="text-slate-400">Sunday</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-purple-500"></div>
+                  <span className="text-slate-400">Holiday</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded-full bg-cyan-500"></div>
+                  <span className="text-slate-400">Leave</span>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
-        {/* SETTINGS TAB */}
         {viewMode === 'settings' && (
           <div className="space-y-6">
             <div className="bg-slate-800 rounded-lg p-6 border border-slate-700 max-w-md">
@@ -1301,63 +1826,17 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* EDIT ATTENDANCE MODAL */}
-        {editingAttendance && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-            <div className="bg-slate-800 rounded-lg p-6 w-full max-w-md border border-slate-700">
-              <h3 className="text-xl font-bold text-white mb-4">Edit Attendance ({editingAttendance.date})</h3>
-              <form onSubmit={handleSubmitEdit} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1">
-                    New Check-In <span className="text-cyan-600">(24-hour format, e.g., 13:00)</span>
-                  </label>
-                  <input 
-                    type="time" 
-                    value={editCheckIn} 
-                    onChange={e => setEditCheckIn(e.target.value)}
-                    className="w-full p-2 bg-slate-700 border border-slate-600 rounded text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1">New Check-Out (HH:MM)</label>
-                  <input 
-                    type="time" 
-                    value={editCheckOut} 
-                    onChange={e => setEditCheckOut(e.target.value)}
-                    className="w-full p-2 bg-slate-700 border border-slate-600 rounded text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 mb-1">Reason (Required)</label>
-                  <input 
-                    type="text" 
-                    required
-                    value={editReason} 
-                    onChange={e => setEditReason(e.target.value)}
-                    placeholder="e.g. Forgot to punch out"
-                    className="w-full p-2 bg-slate-700 border border-slate-600 rounded text-white"
-                  />
-                </div>
-                <div className="flex gap-2 pt-2">
-                  <button 
-                    type="button" 
-                    onClick={() => setEditingAttendance(null)}
-                    className="flex-1 py-2 bg-slate-700 hover:bg-slate-600 rounded font-bold transition"
-                  >
-                    Cancel
-                  </button>
-                  <button 
-                    type="submit" 
-                    className="flex-1 py-2 bg-cyan-600 hover:bg-cyan-700 rounded font-bold transition"
-                  >
-                    Save Changes
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-
+        <AttendanceEditModal
+          editingAttendance={editingAttendance}
+          editCheckIn={editCheckIn}
+          setEditCheckIn={setEditCheckIn}
+          editCheckOut={editCheckOut}
+          setEditCheckOut={setEditCheckOut}
+          editReason={editReason}
+          setEditReason={setEditReason}
+          onSubmit={handleSubmitEdit}
+          onCancel={() => setEditingAttendance(null)}
+        />
       </div>
     </div>
   );

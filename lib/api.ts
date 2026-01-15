@@ -91,21 +91,9 @@ export interface Employee {
   $id: string;
   email: string;
   name: string;
-  salary: number;
+  salaryMonthly: number;
   joinDate: string;
   isActive: boolean;
-}
-
-export interface AuditLog {
-  id: string;
-  timestamp: string;
-  actorId: string;
-  actorName: string;
-  action: string;
-  targetType: string;
-  details: string;
-  deviceInfo: string;
-  signatureVerified: boolean;
 }
 
 // ============================================
@@ -193,12 +181,15 @@ export async function getCurrentLocation(): Promise<Location> {
 }
 
 /**
- * Format date for API (YYYY-MM-DD)
+ * Format date for API (YYYY-MM-DD) in IST timezone
+ * This ensures consistency with the backend which uses IST
  */
 function formatDate(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
+  // Convert to IST for consistency with backend
+  const istDate = new Date(date.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+  const year = istDate.getFullYear();
+  const month = String(istDate.getMonth() + 1).padStart(2, '0');
+  const day = String(istDate.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
 
@@ -352,7 +343,13 @@ export async function getEmployees(): Promise<ApiResponse<{ employees: Employee[
   return callFunction('get-employees');
 }
 
-export async function updateEmployee(employeeId: string, data: Partial<Employee>): Promise<ApiResponse> {
+export async function updateEmployee(employeeId: string, data: {
+  name?: string;
+  email?: string;
+  salary?: number;
+  joinDate?: string;
+  isActive?: boolean;
+}): Promise<ApiResponse> {
   return callFunction('update-employee', { employeeId, data });
 }
 
@@ -443,18 +440,43 @@ export async function getPayrollReport(month?: string): Promise<ApiResponse<{ re
 }
 
 // ============================================
-// ADMIN - AUDIT LOGS
+// ADMIN - ATTENDANCE SHEET
 // ============================================
 
-export async function getAuditLogs(
-  filters?: {
-    employeeId?: string;
-    action?: string;
-    startDate?: string;
-    endDate?: string;
-  },
-  limit: number = 100,
-  offset: number = 0
-): Promise<ApiResponse<{ logs: AuditLog[]; total: number; limit: number; offset: number }>> {
-  return callFunction('get-audit-logs', { filters, limit, offset });
+export interface AttendanceSheetEmployee {
+  employeeId: string;
+  employeeName: string;
+  id: string | null;
+  status: string | null;
+  checkInTime: string | null;
+  checkOutTime: string | null;
+  workHours: number;
+  isLocked: boolean;
+  notes: string;
+}
+
+export interface AttendanceSheetDay {
+  date: string;
+  day: string;
+  isSunday: boolean;
+  employees: AttendanceSheetEmployee[];
+}
+
+export interface AttendanceSheetSummary {
+  totalEmployees: number;
+  checkedIn: number;
+  checkedOut: number;
+  notYetIn: number;
+}
+
+export async function getAllAttendance(
+  date?: string,
+  startDate?: string,
+  endDate?: string
+): Promise<ApiResponse<{
+  records: AttendanceSheetDay[];
+  summary: AttendanceSheetSummary;
+  employees: { id: string; name: string; email: string }[];
+}>> {
+  return callFunction('get-all-attendance', { date, startDate, endDate });
 }

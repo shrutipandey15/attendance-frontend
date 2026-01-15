@@ -242,8 +242,8 @@ export default function Home() {
         // Refresh attendance data
         await fetchAttendanceData();
       } else {
-        // Check for device mismatch
-        if (result.message.includes('Device not registered') || result.message.includes('Invalid signature')) {
+        // Check for device mismatch - handle various device-related error messages
+        if (result.message.includes('not registered') || result.message.includes('not authorized')) {
           const retry = confirm(
             `${result.message}\n\nWould you like to re-register your device?`
           );
@@ -253,7 +253,7 @@ export default function Home() {
             window.location.reload();
           }
         } else {
-          alert(`❌ ${result.message}`);
+          alert(`${result.message}`);
         }
       }
     } catch (error: any) {
