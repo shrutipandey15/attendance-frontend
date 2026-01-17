@@ -654,60 +654,93 @@ const HolidayManagementSection = ({
   setNewHolidayName: (value: string) => void;
   onAddHoliday: (e: React.FormEvent) => void;
   onDeleteHoliday: (id: string, name: string) => void;
-}) => (
-  <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
-    <h2 className="text-lg font-bold text-cyan-400 mb-4 flex items-center gap-2">
-      <CalendarDaysIcon className="w-6 h-6" />
-      Holiday Management
-    </h2>
+}) => {
+  const today = new Date(new Date().toDateString());
+  const sortedHolidays = [...holidays].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  const upcomingCount = holidays.filter(h => new Date(h.date) >= today).length;
+  const pastCount = holidays.length - upcomingCount;
 
-    <form onSubmit={onAddHoliday} className="space-y-3 mb-6">
-      <input
-        type="date"
-        value={newHolidayDate}
-        onChange={e => setNewHolidayDate(e.target.value)}
-        className="w-full p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
-        required
-      />
-      <input
-        type="text"
-        placeholder="Holiday Name (e.g. Diwali)"
-        value={newHolidayName}
-        onChange={e => setNewHolidayName(e.target.value)}
-        className="w-full p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
-        required
-      />
-      <button
-        type="submit"
-        className="w-full bg-green-600 hover:bg-green-700 px-6 py-3 rounded-lg font-bold transition flex items-center justify-center gap-2"
-      >
-        <PlusCircleIcon className="w-5 h-5" />
-        Add Holiday
-      </button>
-    </form>
+  return (
+    <div className="bg-slate-800 rounded-lg p-6 border border-slate-700">
+      <h2 className="text-lg font-bold text-cyan-400 mb-2 flex items-center gap-2">
+        <CalendarDaysIcon className="w-6 h-6" />
+        Holiday Management
+      </h2>
+      <p className="text-xs text-slate-400 mb-4">
+        {upcomingCount} upcoming · {pastCount} past
+      </p>
 
-    <div className="space-y-2">
-      {holidays.length === 0 ? (
-        <p className="text-center text-slate-500 py-4">No holidays configured</p>
-      ) : (
-        holidays.map(holiday => (
-          <div key={holiday.$id} className="flex items-center justify-between bg-slate-700 p-3 rounded-lg">
-            <div>
-              <p className="font-bold text-white">{holiday.name}</p>
-              <p className="text-sm text-slate-400">{new Date(holiday.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
-            </div>
-            <button
-              onClick={() => onDeleteHoliday(holiday.$id, holiday.name)}
-              className="text-red-400 hover:text-red-500 p-2"
-            >
-              <TrashIcon className="w-5 h-5" />
-            </button>
-          </div>
-        ))
-      )}
+      <form onSubmit={onAddHoliday} className="space-y-3 mb-6">
+        <input
+          type="date"
+          value={newHolidayDate}
+          onChange={e => setNewHolidayDate(e.target.value)}
+          className="w-full p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+          required
+        />
+        <input
+          type="text"
+          placeholder="Holiday Name (e.g. Diwali)"
+          value={newHolidayName}
+          onChange={e => setNewHolidayName(e.target.value)}
+          className="w-full p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+          required
+        />
+        <button
+          type="submit"
+          className="w-full bg-green-600 hover:bg-green-700 px-6 py-3 rounded-lg font-bold transition flex items-center justify-center gap-2"
+        >
+          <PlusCircleIcon className="w-5 h-5" />
+          Add Holiday
+        </button>
+      </form>
+
+      <div className="space-y-2 max-h-64 overflow-y-auto">
+        {holidays.length === 0 ? (
+          <p className="text-center text-slate-500 py-4">No holidays configured</p>
+        ) : (
+          sortedHolidays.map(holiday => {
+            const holidayDate = new Date(holiday.date);
+            const isPast = holidayDate < today;
+            const isToday = holidayDate.getTime() === today.getTime();
+
+            return (
+              <div
+                key={holiday.$id}
+                className={`flex items-center justify-between p-3 rounded-lg ${
+                  isPast ? 'bg-slate-700/50 opacity-60' : 'bg-slate-700'
+                }`}
+              >
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className={`font-bold ${isPast ? 'text-slate-400' : 'text-white'}`}>{holiday.name}</p>
+                    {isToday && (
+                      <span className="text-xs bg-green-600 text-white px-2 py-0.5 rounded-full">Today</span>
+                    )}
+                    {!isPast && !isToday && (
+                      <span className="text-xs bg-purple-600/50 text-purple-300 px-2 py-0.5 rounded-full">
+                        {Math.ceil((holidayDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))}d
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-slate-400">
+                    {holidayDate.toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })}
+                  </p>
+                </div>
+                <button
+                  onClick={() => onDeleteHoliday(holiday.$id, holiday.name)}
+                  className="text-red-400 hover:text-red-500 p-2"
+                >
+                  <TrashIcon className="w-5 h-5" />
+                </button>
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 const AttendanceEditModal = ({
   editingAttendance,

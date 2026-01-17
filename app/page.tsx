@@ -12,13 +12,13 @@ import {
     checkOut,
     getMyAttendance,
     registerDevice,
-    getSystemInfo
+    getHolidays
 } from '../lib/api';
-import type { User, AttendanceRecord } from '../lib/api';
+import type { User, AttendanceRecord, Holiday } from '../lib/api';
 import {
     PencilSquareIcon, ArrowRightIcon, ArrowLeftIcon,
     CalendarDaysIcon, XMarkIcon, ShieldCheckIcon, ExclamationTriangleIcon,
-    MapPinIcon // Added Icon
+    MapPinIcon, GiftIcon, ChevronDownIcon, ChevronUpIcon
 } from '@heroicons/react/24/outline';
 
 import { ADMIN_TEAM_ID } from '../lib/constants';
@@ -58,6 +58,9 @@ export default function Home() {
   const [newPwd, setNewPwd] = useState('');
   const [pwdMsg, setPwdMsg] = useState('');
 
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [showHolidays, setShowHolidays] = useState(false);
+
   useEffect(() => {
     checkSession();
   }, []);
@@ -90,7 +93,7 @@ export default function Home() {
       // Fetch data
       await Promise.all([
         fetchAttendanceData(),
-        fetchSystemInfo()
+        fetchHolidays()
       ]);
 
       setView('dashboard');
@@ -102,17 +105,15 @@ export default function Home() {
     }
   };
 
-  const fetchSystemInfo = async () => {
+
+  const fetchHolidays = async () => {
     try {
-      const result = await getSystemInfo();
+      const result = await getHolidays();
       if (result.success && result.data) {
-        setSystemInfo({
-          checkInAllowed: result.data.checkInAllowed,
-          checkOutAllowed: result.data.checkOutAllowed
-        });
+        setHolidays(result.data.holidays);
       }
     } catch (error) {
-      console.error('Failed to fetch system info:', error);
+      console.error('Failed to fetch holidays:', error);
     }
   };
 
@@ -525,6 +526,58 @@ export default function Home() {
                 ))}
               </div>
             </div>
+          </div>
+
+          {/* Upcoming Holidays Section */}
+          <div className="w-full max-w-md bg-slate-800 rounded-lg sm:rounded-xl shadow-lg border border-slate-700 overflow-hidden">
+            <button
+              onClick={() => setShowHolidays(!showHolidays)}
+              className="w-full bg-slate-700 px-3 sm:px-4 py-2.5 sm:py-3 border-b border-slate-600 text-xs sm:text-sm font-bold text-purple-400 uppercase tracking-wide flex justify-between items-center hover:bg-slate-600 transition"
+            >
+              <span className="flex items-center gap-2">
+                <GiftIcon className="w-4 h-4" />
+                Upcoming Holidays
+              </span>
+              <span className="flex items-center gap-2">
+                <span className="text-xs font-normal text-slate-400">{holidays.filter(h => new Date(h.date) >= new Date(new Date().toDateString())).length} upcoming</span>
+                {showHolidays ? <ChevronUpIcon className="w-4 h-4" /> : <ChevronDownIcon className="w-4 h-4" />}
+              </span>
+            </button>
+
+            {showHolidays && (
+              <div className="max-h-60 overflow-y-auto custom-scrollbar">
+                <div className="divide-y divide-slate-700">
+                  {holidays.filter(h => new Date(h.date) >= new Date(new Date().toDateString())).length === 0 ? (
+                    <div className="p-4 text-center text-xs sm:text-sm text-slate-500 italic">
+                      No upcoming holidays.
+                    </div>
+                  ) : (
+                    holidays
+                      .filter(h => new Date(h.date) >= new Date(new Date().toDateString()))
+                      .map((holiday) => (
+                        <div key={holiday.$id} className="flex justify-between items-center p-2.5 sm:p-3 hover:bg-slate-700 transition">
+                          <div className="flex flex-col">
+                            <span className="text-xs sm:text-sm font-bold text-purple-400">
+                              {holiday.name}
+                            </span>
+                            <span className="text-xs text-slate-400">
+                              {new Date(holiday.date).toLocaleDateString('en-IN', {
+                                weekday: 'short',
+                                day: 'numeric',
+                                month: 'short',
+                                year: 'numeric'
+                              })}
+                            </span>
+                          </div>
+                          <div className="text-xs bg-purple-900/50 text-purple-300 px-2 sm:px-3 py-1 rounded-full font-bold border border-purple-800">
+                            {Math.ceil((new Date(holiday.date).getTime() - new Date(new Date().toDateString()).getTime()) / (1000 * 60 * 60 * 24))} days
+                          </div>
+                        </div>
+                      ))
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
