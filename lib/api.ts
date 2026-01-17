@@ -3,7 +3,7 @@
  * Production-ready API client for attendance system backend
  */
 
-import { client, account, functions } from './appwrite';
+import { account, functions } from './appwrite';
 import { FUNCTION_ID } from './constants';
 import { signData } from './crypto';
 
@@ -84,7 +84,6 @@ export interface Holiday {
   $id: string;
   date: string;
   name: string;
-  description: string;
 }
 
 export interface Employee {
@@ -148,7 +147,7 @@ export async function getCurrentUser(): Promise<User | null> {
   try {
     const user = await account.get();
     return user as User;
-  } catch (error) {
+  } catch {
     return null;
   }
 }
@@ -223,19 +222,8 @@ export async function logout(): Promise<void> {
   }
 }
 
-export async function changePassword(oldPassword: string, newPassword: string): Promise<ApiResponse> {
-  try {
-    await account.updatePassword(newPassword, oldPassword);
-    return {
-      success: true,
-      message: 'Password changed successfully'
-    };
-  } catch (error: any) {
-    return {
-      success: false,
-      message: error.message || 'Failed to change password'
-    };
-  }
+export async function changePassword(newPassword: string): Promise<ApiResponse> {
+  return callFunction('reset-my-password', { newPassword });
 }
 
 // ============================================
@@ -387,10 +375,9 @@ export async function modifyAttendance(
 
 export async function createHoliday(
   date: string,
-  name: string,
-  description: string
+  name: string
 ): Promise<ApiResponse> {
-  return callFunction('create-holiday', { date, name, description });
+  return callFunction('create-holiday', { date, name });
 }
 
 export async function deleteHoliday(holidayId: string): Promise<ApiResponse> {

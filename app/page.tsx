@@ -55,15 +55,8 @@ export default function Home() {
   const [todayAttendance, setTodayAttendance] = useState<AttendanceRecord | null>(null);
 
   const [showPwdModal, setShowPwdModal] = useState(false);
-  const [oldPwd, setOldPwd] = useState('');
   const [newPwd, setNewPwd] = useState('');
   const [pwdMsg, setPwdMsg] = useState('');
-
-  const [systemInfo, setSystemInfo] = useState<{
-    checkInAllowed: boolean;
-    checkOutAllowed: boolean;
-    message?: string;
-  } | null>(null);
 
   useEffect(() => {
     checkSession();
@@ -205,7 +198,7 @@ export default function Home() {
       const intent = currentStatus === 'checked-in' ? 'check-out' : 'check-in';
 
       // 2. CHECK DEVICE BINDING
-      let isBound = await isDeviceBound();
+      const isBound = await isDeviceBound();
 
       if (!isBound) {
         // Register device
@@ -267,10 +260,14 @@ export default function Home() {
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (newPwd.length < 8) {
+      setPwdMsg('❌ Password must be at least 8 characters');
+      return;
+    }
     setPwdMsg('Updating...');
 
     try {
-      const result = await apiChangePassword(oldPwd, newPwd);
+      const result = await apiChangePassword(newPwd);
 
       if (result.success) {
         setPwdMsg('✅ Password Changed! Logging out...');
@@ -280,7 +277,6 @@ export default function Home() {
           setUser(null);
           setShowPwdModal(false);
           setPwdMsg('');
-          setOldPwd('');
           setNewPwd('');
           window.location.reload();
         }, 2000);
@@ -300,16 +296,6 @@ export default function Home() {
     setCurrentStatus('unknown');
     setHistory([]);
     window.location.reload();
-  };
-
-  const formatTimestamp = (isoString: string | null) => {
-    if (!isoString) return 'N/A';
-    const date = new Date(isoString);
-    return date.toLocaleString('en-IN', {
-      timeZone: 'Asia/Kolkata',
-      dateStyle: 'medium',
-      timeStyle: 'short'
-    });
   };
 
   const formatTime = (isoString: string | null) => {
@@ -448,10 +434,10 @@ export default function Home() {
             STATUS: {currentStatus === 'checked-in' ? 'CLOCKED IN' : 'CLOCKED OUT'}
           </div>
 
-          {/* Today's Summary */}
+          {/* Today Summary */}
           {todayAttendance && (
             <div className="w-full bg-slate-800 rounded-lg p-4 border border-slate-700">
-              <h3 className="text-cyan-400 font-bold text-sm mb-3">Today's Summary</h3>
+              <h3 className="text-cyan-400 font-bold text-sm mb-3">Today Summary</h3>
               <div className="grid grid-cols-2 gap-3 text-xs sm:text-sm">
                 <div>
                   <p className="text-slate-400">Check-in</p>
@@ -558,23 +544,15 @@ export default function Home() {
             </div>
             <form onSubmit={handleChangePassword} className="space-y-4">
               <div>
-                <label className="text-xs font-bold text-slate-400 uppercase block mb-1">Old Password</label>
-                <input
-                  type="password"
-                  value={oldPwd}
-                  onChange={e => setOldPwd(e.target.value)}
-                  className="w-full p-3 border border-slate-600 rounded-lg bg-slate-700 text-white focus:ring-2 focus:ring-cyan-400 text-base"
-                  required
-                />
-              </div>
-              <div>
                 <label className="text-xs font-bold text-slate-400 uppercase block mb-1">New Password</label>
                 <input
                   type="password"
                   value={newPwd}
                   onChange={e => setNewPwd(e.target.value)}
+                  placeholder="Minimum 8 characters"
                   className="w-full p-3 border border-slate-600 rounded-lg bg-slate-700 text-white focus:ring-2 focus:ring-cyan-400 text-base"
                   required
+                  minLength={8}
                 />
               </div>
 

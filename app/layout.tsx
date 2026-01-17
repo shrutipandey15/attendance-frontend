@@ -44,7 +44,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" data-scroll-behavior="smooth">
       <head>
         <link rel="apple-touch-icon" href="/window.svg" />
         <meta name="apple-mobile-web-app-capable" content="yes" />

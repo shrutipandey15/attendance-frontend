@@ -20,14 +20,14 @@ import {
   deletePayroll,
   getAllAttendance
 } from '../../lib/api';
-import type { User, PayrollRecord, Holiday, AttendanceSheetDay, AttendanceSheetSummary, AttendanceSheetEmployee } from '../../lib/api';
+import type { User, PayrollRecord, Holiday, AttendanceSheetDay, AttendanceSheetSummary } from '../../lib/api';
 import {
   ShieldCheckIcon, UserPlusIcon, CalendarDaysIcon, CurrencyRupeeIcon,
   ClipboardDocumentListIcon, Cog6ToothIcon, PlusCircleIcon, TrashIcon,
   LockOpenIcon, LockClosedIcon, MagnifyingGlassIcon,
   PencilSquareIcon, DevicePhoneMobileIcon, MapPinIcon,
   ChevronDownIcon, UserIcon, XMarkIcon, ChevronLeftIcon, ChevronRightIcon,
-  CheckCircleIcon, XCircleIcon, ClockIcon, ArrowPathIcon
+  ArrowPathIcon
 } from '@heroicons/react/24/outline';
 
 type ViewMode = 'manage' | 'attendance' | 'payroll' | 'settings';
@@ -301,40 +301,46 @@ const EmployeeSearchDropdown = ({
 };
 
 const EmployeeDetailsView = ({ employee, onEdit }: { employee: Employee; onEdit: () => void }) => (
-  <div className="flex items-start justify-between">
-    <div className="flex items-center gap-4">
-      <div className={`w-16 h-16 rounded-full flex items-center justify-center border ${
+  <div className="space-y-4">
+    {/* Row 1: Avatar and Name */}
+    <div className="flex items-center gap-3">
+      <div className={`w-12 h-12 rounded-full flex items-center justify-center border flex-shrink-0 ${
         employee.isActive ? 'bg-cyan-900/50 text-cyan-400 border-cyan-800' : 'bg-red-900/50 text-red-400 border-red-800'
       }`}>
-        <UserIcon className="w-8 h-8" />
+        <UserIcon className="w-6 h-6" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <h3 className="text-lg font-bold text-white truncate">{employee.name}</h3>
+        <p className="text-sm text-slate-400 truncate">{employee.email}</p>
+      </div>
+      <span className={`px-2 py-1 rounded text-xs font-bold flex-shrink-0 ${
+        employee.isActive
+          ? 'bg-green-900/50 text-green-400'
+          : 'bg-red-900/50 text-red-400'
+      }`}>
+        {employee.isActive ? 'Active' : 'Inactive'}
+      </span>
+    </div>
+
+    {/* Row 2: Salary and Join Date */}
+    <div className="grid grid-cols-2 gap-4 bg-slate-900/50 rounded-lg p-3">
+      <div>
+        <p className="text-xs text-slate-500 uppercase">Monthly Salary</p>
+        <p className="text-lg font-mono font-bold text-cyan-400">₹{employee.salaryMonthly?.toLocaleString()}</p>
       </div>
       <div>
-        <h3 className="text-2xl font-bold text-white">{employee.name}</h3>
-        <p className="text-slate-400">{employee.email}</p>
-        <div className="flex gap-2 mt-2">
-          <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-            employee.isActive
-              ? 'bg-green-900/50 text-green-400 border border-green-800'
-              : 'bg-red-900/50 text-red-400 border border-red-800'
-          }`}>
-            {employee.isActive ? 'Active' : 'Inactive'}
-          </span>
-        </div>
+        <p className="text-xs text-slate-500 uppercase">Joined</p>
+        <p className="text-lg font-bold text-white">{new Date(employee.joinDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
       </div>
     </div>
 
-    <div className="text-right space-y-1">
-      <p className="text-xs text-slate-400 uppercase font-bold">Monthly Salary</p>
-      <p className="text-2xl font-mono text-cyan-400">₹{employee.salaryMonthly?.toLocaleString()}</p>
-      <p className="text-xs text-slate-500 pt-2">Joined: {new Date(employee.joinDate).toLocaleDateString()}</p>
-
-      <button
-        onClick={onEdit}
-        className="mt-4 flex items-center gap-2 text-sm font-bold text-cyan-400 hover:text-cyan-300 bg-slate-800 px-3 py-2 rounded border border-slate-600 hover:border-cyan-400 transition ml-auto"
-      >
-        <PencilSquareIcon className="w-4 h-4" /> Edit Profile
-      </button>
-    </div>
+    {/* Row 3: Edit Button */}
+    <button
+      onClick={onEdit}
+      className="w-full flex items-center justify-center gap-2 text-sm font-bold text-cyan-400 hover:text-cyan-300 bg-slate-800 px-4 py-2.5 rounded-lg border border-slate-600 hover:border-cyan-400 transition"
+    >
+      <PencilSquareIcon className="w-4 h-4" /> Edit Profile
+    </button>
   </div>
 );
 
@@ -470,29 +476,41 @@ const CreateEmployeeForm = ({
       <UserPlusIcon className="w-6 h-6" />
       Create New Employee
     </h2>
-    <form onSubmit={onSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <form onSubmit={onSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4" autoComplete="off" data-form-type="other">
       <input
         type="text"
         placeholder="Full Name"
         value={newEmpName}
         onChange={e => setNewEmpName(e.target.value)}
         className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+        name="emp_fullname_new"
+        autoComplete="off"
+        data-lpignore="true"
+        data-form-type="other"
         required
       />
       <input
-        type="email"
+        type="text"
         placeholder="Email"
         value={newEmpEmail}
         onChange={e => setNewEmpEmail(e.target.value)}
         className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+        name="emp_contact_new"
+        autoComplete="off"
+        data-lpignore="true"
+        data-form-type="other"
         required
       />
       <input
-        type="password"
+        type="text"
         placeholder="Password"
         value={newEmpPassword}
         onChange={e => setNewEmpPassword(e.target.value)}
         className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+        name="emp_secret_new"
+        autoComplete="off"
+        data-lpignore="true"
+        data-form-type="other"
         required
       />
       <input
@@ -501,6 +519,10 @@ const CreateEmployeeForm = ({
         value={newEmpSalary}
         onChange={e => setNewEmpSalary(e.target.value)}
         className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+        name="emp_amount_new"
+        autoComplete="off"
+        data-lpignore="true"
+        data-form-type="other"
         required
       />
       <input
@@ -509,6 +531,10 @@ const CreateEmployeeForm = ({
         value={newEmpJoinDate}
         onChange={e => setNewEmpJoinDate(e.target.value)}
         className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+        name="emp_startdate_new"
+        autoComplete="off"
+        data-lpignore="true"
+        data-form-type="other"
         required
       />
       <button
@@ -572,37 +598,35 @@ const OfficeLocationForm = ({
           required
         />
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="flex gap-2">
-          <input
-            type="number"
-            step="any"
-            placeholder="Latitude"
-            value={officeLat}
-            onChange={e => setOfficeLat(e.target.value)}
-            className="flex-1 p-3 bg-slate-700 border border-slate-600 rounded-lg text-white"
-            required
-          />
-          <input
-            type="number"
-            step="any"
-            placeholder="Longitude"
-            value={officeLng}
-            onChange={e => setOfficeLng(e.target.value)}
-            className="flex-1 p-3 bg-slate-700 border border-slate-600 rounded-lg text-white"
-            required
-          />
-        </div>
-        <button
-          type="button"
-          onClick={onGetLocation}
-          disabled={isGettingLoc}
-          className="bg-slate-700 hover:bg-slate-600 border border-slate-600 text-cyan-400 px-4 py-3 rounded-lg font-bold transition flex items-center justify-center gap-2"
-        >
-          <MapPinIcon className="w-5 h-5" />
-          {isGettingLoc ? "Locating..." : "Get My Current Location"}
-        </button>
+      <div className="grid grid-cols-2 gap-3">
+        <input
+          type="number"
+          step="any"
+          placeholder="Latitude"
+          value={officeLat}
+          onChange={e => setOfficeLat(e.target.value)}
+          className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white"
+          required
+        />
+        <input
+          type="number"
+          step="any"
+          placeholder="Longitude"
+          value={officeLng}
+          onChange={e => setOfficeLng(e.target.value)}
+          className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white"
+          required
+        />
       </div>
+      <button
+        type="button"
+        onClick={onGetLocation}
+        disabled={isGettingLoc}
+        className="w-full bg-slate-700 hover:bg-slate-600 border border-slate-600 text-cyan-400 px-4 py-3 rounded-lg font-bold transition flex items-center justify-center gap-2"
+      >
+        <MapPinIcon className="w-5 h-5" />
+        {isGettingLoc ? "Locating..." : "Get My Current Location"}
+      </button>
 
       <button
         type="submit"
@@ -620,8 +644,6 @@ const HolidayManagementSection = ({
   setNewHolidayDate,
   newHolidayName,
   setNewHolidayName,
-  newHolidayDesc,
-  setNewHolidayDesc,
   onAddHoliday,
   onDeleteHoliday
 }: {
@@ -630,8 +652,6 @@ const HolidayManagementSection = ({
   setNewHolidayDate: (value: string) => void;
   newHolidayName: string;
   setNewHolidayName: (value: string) => void;
-  newHolidayDesc: string;
-  setNewHolidayDesc: (value: string) => void;
   onAddHoliday: (e: React.FormEvent) => void;
   onDeleteHoliday: (id: string, name: string) => void;
 }) => (
@@ -641,32 +661,25 @@ const HolidayManagementSection = ({
       Holiday Management
     </h2>
 
-    <form onSubmit={onAddHoliday} className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+    <form onSubmit={onAddHoliday} className="space-y-3 mb-6">
       <input
         type="date"
         value={newHolidayDate}
         onChange={e => setNewHolidayDate(e.target.value)}
-        className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+        className="w-full p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
         required
       />
       <input
         type="text"
-        placeholder="Holiday Name"
+        placeholder="Holiday Name (e.g. Diwali)"
         value={newHolidayName}
         onChange={e => setNewHolidayName(e.target.value)}
-        className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
+        className="w-full p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
         required
-      />
-      <input
-        type="text"
-        placeholder="Description"
-        value={newHolidayDesc}
-        onChange={e => setNewHolidayDesc(e.target.value)}
-        className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
       />
       <button
         type="submit"
-        className="bg-green-600 hover:bg-green-700 px-6 py-3 rounded-lg font-bold transition flex items-center justify-center gap-2"
+        className="w-full bg-green-600 hover:bg-green-700 px-6 py-3 rounded-lg font-bold transition flex items-center justify-center gap-2"
       >
         <PlusCircleIcon className="w-5 h-5" />
         Add Holiday
@@ -681,7 +694,7 @@ const HolidayManagementSection = ({
           <div key={holiday.$id} className="flex items-center justify-between bg-slate-700 p-3 rounded-lg">
             <div>
               <p className="font-bold text-white">{holiday.name}</p>
-              <p className="text-sm text-slate-400">{holiday.date} - {holiday.description}</p>
+              <p className="text-sm text-slate-400">{new Date(holiday.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
             </div>
             <button
               onClick={() => onDeleteHoliday(holiday.$id, holiday.name)}
@@ -808,7 +821,6 @@ export default function AdminDashboard() {
 
   const [newHolidayDate, setNewHolidayDate] = useState('');
   const [newHolidayName, setNewHolidayName] = useState('');
-  const [newHolidayDesc, setNewHolidayDesc] = useState('');
 
   // Office Location State
   const [officeName, setOfficeName] = useState('');
@@ -842,7 +854,6 @@ export default function AdminDashboard() {
   const [attendanceViewMode, setAttendanceViewMode] = useState<'day' | 'week'>('day');
 
   // Settings Tab State
-  const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [passwordMsg, setPasswordMsg] = useState('');
 
@@ -949,12 +960,11 @@ export default function AdminDashboard() {
   const handleAddHoliday = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const result = await createHoliday(newHolidayDate, newHolidayName, newHolidayDesc);
+      const result = await createHoliday(newHolidayDate, newHolidayName);
       if (result.success) {
         alert(`✅ ${result.message}`);
         setNewHolidayDate('');
         setNewHolidayName('');
-        setNewHolidayDesc('');
         await fetchHolidays();
       } else {
         alert(`❌ ${result.message}`);
@@ -1218,12 +1228,15 @@ export default function AdminDashboard() {
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (newPassword.length < 8) {
+      setPasswordMsg('❌ Password must be at least 8 characters');
+      return;
+    }
     setPasswordMsg('Updating...');
     try {
-      const result = await apiChangePassword(oldPassword, newPassword);
+      const result = await apiChangePassword(newPassword);
       if (result.success) {
         setPasswordMsg('✅ Password changed successfully!');
-        setOldPassword('');
         setNewPassword('');
         setTimeout(() => {
           setPasswordMsg('');
@@ -1320,8 +1333,6 @@ export default function AdminDashboard() {
               setNewHolidayDate={setNewHolidayDate}
               newHolidayName={newHolidayName}
               setNewHolidayName={setNewHolidayName}
-              newHolidayDesc={newHolidayDesc}
-              setNewHolidayDesc={setNewHolidayDesc}
               onAddHoliday={handleAddHoliday}
               onDeleteHoliday={handleDeleteHoliday}
             />
@@ -1600,8 +1611,8 @@ export default function AdminDashboard() {
               )}
             </div>
 
-            {/* Attendance Table */}
-            <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
+            {/* Attendance List */}
+            <div className="bg-slate-800 rounded-lg border border-slate-700">
               {isLoadingAttendance ? (
                 <div className="p-12 text-center">
                   <ArrowPathIcon className="w-12 h-12 text-cyan-400 mx-auto mb-4 animate-spin" />
@@ -1614,133 +1625,92 @@ export default function AdminDashboard() {
                   <p className="text-sm text-slate-500 mt-2">Select a date to view attendance</p>
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-slate-700/50 text-xs text-slate-400 uppercase">
-                      <tr>
-                        <th className="px-4 py-3 text-left font-bold">Employee</th>
-                        <th className="px-3 py-3 text-center font-bold w-20">Status</th>
-                        <th className="px-3 py-3 text-center font-bold w-24">In</th>
-                        <th className="px-3 py-3 text-center font-bold w-24">Out</th>
-                        <th className="px-3 py-3 text-center font-bold w-16">Hours</th>
-                        <th className="px-3 py-3 text-left font-bold hidden md:table-cell">Notes</th>
-                        <th className="px-3 py-3 text-center font-bold w-12"></th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-700/50">
-                      {attendanceRecords.map((dayRecord) => (
-                        <>
-                          {/* Day Header (for week view) */}
-                          {attendanceViewMode === 'week' && (
-                            <tr key={`header-${dayRecord.date}`}>
-                              <td colSpan={7} className={`px-4 py-2 font-bold text-sm ${
-                                dayRecord.isSunday ? 'bg-blue-900/30 text-blue-400' : 'bg-slate-700/30 text-slate-300'
+                <div>
+                  {attendanceRecords.map((dayRecord) => (
+                    <div key={dayRecord.date}>
+                      {/* Day Header (for week view) */}
+                      {attendanceViewMode === 'week' && (
+                        <div className={`px-4 py-2 font-bold text-sm ${
+                          dayRecord.isSunday ? 'bg-blue-900/30 text-blue-400' : 'bg-slate-700/30 text-slate-300'
+                        }`}>
+                          {dayRecord.day}, {new Date(dayRecord.date).toLocaleDateString('en-IN', {
+                            day: 'numeric', month: 'short', year: 'numeric'
+                          })}
+                          {dayRecord.isSunday && <span className="ml-2 text-xs opacity-70">(Sunday)</span>}
+                        </div>
+                      )}
+
+                      {/* Employee List */}
+                      <div className="divide-y divide-slate-700/50">
+                        {dayRecord.employees.map((emp) => (
+                          <div
+                            key={`${dayRecord.date}-${emp.employeeId}`}
+                            className={`px-4 py-3 ${dayRecord.isSunday ? 'bg-blue-900/5' : ''}`}
+                          >
+                            {/* Line 1: Name and Status */}
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-semibold text-white truncate">{emp.employeeName}</span>
+                              <span className={`text-xs font-bold px-2 py-0.5 rounded flex-shrink-0 ${
+                                emp.status === 'present' ? 'bg-green-900/50 text-green-400' :
+                                emp.status === 'half_day' ? 'bg-yellow-900/50 text-yellow-400' :
+                                emp.status === 'absent' ? 'bg-red-900/50 text-red-400' :
+                                emp.status === 'sunday' ? 'bg-blue-900/50 text-blue-400' :
+                                emp.status === 'holiday' ? 'bg-purple-900/50 text-purple-400' :
+                                emp.status === 'leave' ? 'bg-cyan-900/50 text-cyan-400' :
+                                'bg-slate-700 text-slate-400'
                               }`}>
-                                {dayRecord.day}, {new Date(dayRecord.date).toLocaleDateString('en-IN', {
-                                  day: 'numeric', month: 'short', year: 'numeric'
-                                })}
-                                {dayRecord.isSunday && <span className="ml-2 text-xs opacity-70">(Sunday)</span>}
-                              </td>
-                            </tr>
-                          )}
-                          {dayRecord.employees.map((emp) => (
-                            <tr
-                              key={`${dayRecord.date}-${emp.employeeId}`}
-                              className={`hover:bg-slate-700/30 transition ${
-                                dayRecord.isSunday ? 'bg-blue-900/5' : ''
-                              }`}
-                            >
-                              {/* Employee Info */}
-                              <td className="px-4 py-3">
-                                <div className="flex items-center gap-3">
-                                  <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${
-                                    emp.status === 'present' ? 'bg-green-900/50 text-green-400' :
-                                    emp.status === 'half_day' ? 'bg-yellow-900/50 text-yellow-400' :
-                                    emp.status === 'absent' ? 'bg-red-900/50 text-red-400' :
-                                    emp.status === 'sunday' ? 'bg-blue-900/50 text-blue-400' :
-                                    emp.status === 'holiday' ? 'bg-purple-900/50 text-purple-400' :
-                                    emp.status === 'leave' ? 'bg-cyan-900/50 text-cyan-400' :
-                                    'bg-slate-700 text-slate-400'
-                                  }`}>
-                                    {emp.employeeName.charAt(0).toUpperCase()}
-                                  </div>
-                                  <div className="min-w-0">
-                                    <p className="font-bold text-white truncate">{emp.employeeName}</p>
-                                    <p className="text-xs text-slate-500">
-                                      {emp.status ? emp.status.replace('_', ' ').toUpperCase() : 'NO RECORD'}
-                                    </p>
-                                  </div>
-                                </div>
-                              </td>
+                                {emp.status ? emp.status.replace('_', ' ').toUpperCase() : 'N/A'}
+                              </span>
+                            </div>
 
-                              {/* Status Icon */}
-                              <td className="px-3 py-3 text-center">
-                                {emp.checkInTime ? (
-                                  <CheckCircleIcon className="w-5 h-5 text-green-400 mx-auto" title="Checked In" />
-                                ) : emp.status === 'sunday' || emp.status === 'holiday' ? (
-                                  <CalendarDaysIcon className="w-5 h-5 text-blue-400 mx-auto" title={emp.status || ''} />
-                                ) : (
-                                  <XCircleIcon className="w-5 h-5 text-slate-500 mx-auto" title="Not Checked In" />
-                                )}
-                              </td>
-
-                              {/* Check In Time */}
-                              <td className="px-3 py-3 text-center">
-                                <p className={`font-mono text-sm ${emp.checkInTime ? 'text-green-400' : 'text-slate-600'}`}>
+                            {/* Line 2: In, Out, Hours */}
+                            <div className="flex items-center gap-4 mt-1.5 text-sm">
+                              <div className="flex items-center gap-1">
+                                <span className="text-slate-500">In:</span>
+                                <span className={`font-mono ${emp.checkInTime ? 'text-green-400' : 'text-slate-600'}`}>
                                   {emp.checkInTime
                                     ? new Date(emp.checkInTime).toLocaleTimeString('en-IN', {
                                         hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata'
                                       })
                                     : '--:--'
                                   }
-                                </p>
-                              </td>
-
-                              {/* Check Out Time */}
-                              <td className="px-3 py-3 text-center">
-                                <p className={`font-mono text-sm ${emp.checkOutTime ? 'text-orange-400' : 'text-slate-600'}`}>
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <span className="text-slate-500">Out:</span>
+                                <span className={`font-mono ${emp.checkOutTime ? 'text-orange-400' : 'text-slate-600'}`}>
                                   {emp.checkOutTime
                                     ? new Date(emp.checkOutTime).toLocaleTimeString('en-IN', {
                                         hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata'
                                       })
                                     : '--:--'
                                   }
-                                </p>
-                              </td>
-
-                              {/* Hours */}
-                              <td className="px-3 py-3 text-center">
-                                <p className={`font-mono font-bold text-sm ${
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <span className="text-slate-500">Hrs:</span>
+                                <span className={`font-mono font-bold ${
                                   emp.workHours >= 6 ? 'text-green-400' :
                                   emp.workHours >= 4 ? 'text-yellow-400' :
                                   emp.workHours > 0 ? 'text-red-400' :
                                   'text-slate-600'
                                 }`}>
                                   {emp.workHours > 0 ? emp.workHours.toFixed(1) : '-'}
-                                </p>
-                              </td>
+                                </span>
+                              </div>
+                            </div>
 
-                              {/* Notes */}
-                              <td className="px-3 py-3 hidden md:table-cell">
-                                <p className="text-xs text-slate-500 truncate max-w-[180px]" title={emp.notes || ''}>
-                                  {emp.notes || '-'}
-                                </p>
-                              </td>
-
-                              {/* Lock Status */}
-                              <td className="px-3 py-3 text-center">
-                                {emp.isLocked ? (
-                                  <LockClosedIcon className="w-4 h-4 text-amber-500 mx-auto" title="Locked" />
-                                ) : (
-                                  <LockOpenIcon className="w-4 h-4 text-slate-600 mx-auto" title="Unlocked" />
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </>
-                      ))}
-                    </tbody>
-                  </table>
+                            {/* Line 3: Notes (if any) */}
+                            {emp.notes && (
+                              <p className="mt-1.5 text-xs text-slate-400">
+                                {emp.notes}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -1787,23 +1757,15 @@ export default function AdminDashboard() {
               </h2>
               <form onSubmit={handleChangePassword} className="space-y-4">
                 <div>
-                  <label className="text-xs font-bold text-slate-400 uppercase block mb-1">Old Password</label>
-                  <input
-                    type="password"
-                    value={oldPassword}
-                    onChange={e => setOldPassword(e.target.value)}
-                    className="w-full p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
-                    required
-                  />
-                </div>
-                <div>
                   <label className="text-xs font-bold text-slate-400 uppercase block mb-1">New Password</label>
                   <input
                     type="password"
                     value={newPassword}
                     onChange={e => setNewPassword(e.target.value)}
+                    placeholder="Minimum 8 characters"
                     className="w-full p-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:ring-2 focus:ring-cyan-400"
                     required
+                    minLength={8}
                   />
                 </div>
 
